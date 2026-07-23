@@ -73,7 +73,7 @@ function authRoutes(app) {
       }
 
       req.session.user = { email, name: payload.name || email };
-      res.redirect('/');
+      req.session.save(() => res.redirect('/'));
     } catch (err) {
       console.error('[auth] callback error:', err.message);
       res.status(500).send(`Auth callback error: ${err.message}`);
