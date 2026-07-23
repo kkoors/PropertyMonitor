@@ -3,3 +3,4 @@ dist/
 .env
 *.db
 bills/
+.claude/launch.json
