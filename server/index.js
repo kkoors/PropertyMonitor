@@ -11,6 +11,9 @@ const makeScrapesRouter = require('./routes/scrapes');
 const { makeRunScrapers, makeRunOne } = require('./scrapers/index');
 const lookupRouter = require('./routes/lookup');
 const makeEmailRouter = require('./routes/email');
+const makeLeadRouter = require('./routes/lead');
+const makeRentalLicensesRouter = require('./routes/rentalLicenses');
+const makeComplianceRouter = require('./routes/compliance');
 
 const PORT = process.env.PORT || 3401;
 
@@ -35,6 +38,9 @@ async function start() {
   app.use('/api/scrapes', makeScrapesRouter(db, runAllScrapers, runOneProperty));
   app.use('/api/lookup', lookupRouter(db));
   app.use('/api/email', makeEmailRouter(db));
+  app.use('/api/lead', makeLeadRouter(db));
+  app.use('/api/rental-licenses', makeRentalLicensesRouter(db));
+  app.use('/api/compliance', makeComplianceRouter(db));
   app.get('/api/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
   if (process.env.NODE_ENV === 'production') {

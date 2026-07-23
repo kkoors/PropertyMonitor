@@ -8,7 +8,7 @@ const MUNICIPALITIES = [
   { value: 'harford', label: 'Harford County' },
 ]
 
-const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false }
+const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '' }
 
 export default function Properties() {
   const [properties, setProperties] = useState<any[]>([])
@@ -36,7 +36,14 @@ export default function Properties() {
   async function save() {
     const method = editId ? 'PUT' : 'POST'
     const url = editId ? `/api/properties/${editId}` : '/api/properties'
-    await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, private_ws: form.private_ws ? 1 : 0 }) })
+    await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      ...form,
+      private_ws: form.private_ws ? 1 : 0,
+      year_built: form.year_built ? Number(form.year_built) : null,
+      lead_free: form.lead_free ? 1 : 0,
+      lead_free_cert_date: form.lead_free_cert_date || null,
+      lead_free_cert_exp_date: form.lead_free_cert_exp_date || null,
+    }) })
     setShowForm(false)
     setEditId(null)
     setForm({ ...BLANK })
@@ -44,7 +51,7 @@ export default function Properties() {
   }
 
   function startEdit(p: any) {
-    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws })
+    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '' })
     setEditId(p.id)
     setShowForm(true)
   }
@@ -156,6 +163,10 @@ export default function Properties() {
               <label>Notes</label>
               <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
             </div>
+            <div className="form-group">
+              <label>Year Built</label>
+              <input type="number" min="1800" max="2030" value={form.year_built} onChange={e => setForm(f => ({ ...f, year_built: e.target.value }))} placeholder="e.g. 1965" />
+            </div>
             <div className="form-group" style={{ justifyContent: 'center' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
                 <input type="checkbox" checked={form.private_ws} onChange={e => setForm(f => ({ ...f, private_ws: e.target.checked }))} />
@@ -163,6 +174,23 @@ export default function Properties() {
               </label>
               <span style={{ fontSize: 11, color: '#9ca3af' }}>Skip bill monitoring for this property</span>
             </div>
+            <div className="form-group" style={{ justifyContent: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
+                <input type="checkbox" checked={form.lead_free} onChange={e => setForm(f => ({ ...f, lead_free: e.target.checked }))} />
+                Lead-Free Certified
+              </label>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>Property is certified lead-free</span>
+            </div>
+            {form.lead_free && (<>
+              <div className="form-group">
+                <label>Lead-Free Cert Date</label>
+                <input type="date" value={form.lead_free_cert_date} onChange={e => setForm(f => ({ ...f, lead_free_cert_date: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label>Lead-Free Cert Expiration</label>
+                <input type="date" value={form.lead_free_cert_exp_date} onChange={e => setForm(f => ({ ...f, lead_free_cert_exp_date: e.target.value }))} />
+              </div>
+            </>)}
           </div>
           <div className="form-actions">
             <button className="btn btn-primary" onClick={save}>Save</button>

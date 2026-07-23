@@ -113,6 +113,32 @@ function initSchema(db) {
 
     CREATE UNIQUE INDEX IF NOT EXISTS uq_credentials ON credentials(property_id, portal);
     CREATE UNIQUE INDEX IF NOT EXISTS uq_bills ON bills(property_id, bill_date, amount_due);
+
+    CREATE TABLE IF NOT EXISTS lead_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      property_id INTEGER NOT NULL,
+      turnover_date TEXT,
+      inspection_date TEXT,
+      cert_number TEXT,
+      cert_exp_date TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS rental_licenses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      property_id INTEGER NOT NULL,
+      municipality TEXT NOT NULL,
+      license_type TEXT NOT NULL DEFAULT 'rental_license',
+      license_number TEXT,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      holder_name TEXT,
+      issue_date TEXT,
+      exp_date TEXT,
+      scraped_at TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Migrations for existing databases
@@ -122,7 +148,12 @@ function initSchema(db) {
   if (!billCols.includes('last_pay_amount')) db.exec(`ALTER TABLE bills ADD COLUMN last_pay_amount REAL`);
 
   const propCols = db._db.exec(`PRAGMA table_info(properties)`)[0]?.values.map(r => r[1]) || [];
-  if (!propCols.includes('private_ws')) db.exec(`ALTER TABLE properties ADD COLUMN private_ws INTEGER NOT NULL DEFAULT 0`);
+  if (!propCols.includes('private_ws'))            db.exec(`ALTER TABLE properties ADD COLUMN private_ws INTEGER NOT NULL DEFAULT 0`);
+  if (!propCols.includes('year_built'))             db.exec(`ALTER TABLE properties ADD COLUMN year_built INTEGER`);
+  if (!propCols.includes('sdat_acct'))              db.exec(`ALTER TABLE properties ADD COLUMN sdat_acct TEXT`);
+  if (!propCols.includes('lead_free'))              db.exec(`ALTER TABLE properties ADD COLUMN lead_free INTEGER NOT NULL DEFAULT 0`);
+  if (!propCols.includes('lead_free_cert_date'))    db.exec(`ALTER TABLE properties ADD COLUMN lead_free_cert_date TEXT`);
+  if (!propCols.includes('lead_free_cert_exp_date')) db.exec(`ALTER TABLE properties ADD COLUMN lead_free_cert_exp_date TEXT`);
 }
 
 // ── Encryption ────────────────────────────────────────────────────────────────
