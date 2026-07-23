@@ -22,6 +22,7 @@ async function start() {
   const runOneProperty = makeRunOne(db);
 
   const app = express();
+  app.set('trust proxy', 1);
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
   app.use(sessionMiddleware());
