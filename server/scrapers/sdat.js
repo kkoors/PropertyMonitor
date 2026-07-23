@@ -47,7 +47,8 @@ async function scrapeSdatPlaywright(countyCode, parsed, municipality) {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
-    await page.goto('https://sdat.dat.maryland.gov/RealProperty/Pages/default.aspx', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    page.setDefaultTimeout(45000);
+    await page.goto('https://sdat.dat.maryland.gov/RealProperty/Pages/default.aspx', { waitUntil: 'networkidle', timeout: 45000 });
 
     // Select county
     const countyLabels = {

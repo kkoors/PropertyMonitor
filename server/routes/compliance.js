@@ -132,6 +132,27 @@ module.exports = function makeComplianceRouter(db) {
     res.json(result);
   });
 
+  // Bulk: update all Baltimore County rental licenses
+  router.post('/update-all-licenses', async (req, res) => {
+    const properties = db.prepare(`SELECT * FROM properties WHERE active = 1 AND municipality = 'baltimore_county'`).all();
+    const results = [];
+    for (const property of properties) {
+      const result = await scrapeRentalLicenseBaltimoreCounty(property);
+      if (!result.error) {
+        const existing = db.prepare(`SELECT id FROM rental_licenses WHERE property_id = ? AND municipality = 'baltimore_county' AND license_type = 'rental_license'`).get(property.id);
+        if (existing) {
+          db.prepare(`UPDATE rental_licenses SET license_number=?, status=?, issue_date=?, exp_date=?, scraped_at=datetime('now') WHERE id=?`)
+            .run(result.license_number, result.status, result.issue_date || null, result.exp_date || null, existing.id);
+        } else {
+          db.prepare(`INSERT INTO rental_licenses (property_id, municipality, license_type, license_number, status, issue_date, exp_date, scraped_at) VALUES (?,?,?,?,?,?,?,datetime('now'))`)
+            .run(property.id, 'baltimore_county', 'rental_license', result.license_number, result.status, result.issue_date || null, result.exp_date || null);
+        }
+      }
+      results.push({ id: property.id, name: property.name, ...result });
+    }
+    res.json({ updated: results.length, results });
+  });
+
   // Trigger MDE lead registration check
   router.post('/mde/:propertyId', async (req, res) => {
     const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);

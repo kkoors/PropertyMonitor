@@ -60,6 +60,8 @@ export default function Compliance() {
   const [loading, setLoading] = useState(true)
   const [checking, setChecking] = useState<Record<string, boolean>>({})
   const [messages, setMessages] = useState<Record<string, string>>({})
+  const [updatingAll, setUpdatingAll] = useState(false)
+  const [updateMsg, setUpdateMsg] = useState('')
 
   useEffect(() => { load() }, [])
 
@@ -68,6 +70,21 @@ export default function Compliance() {
     const data = await fetch('/api/compliance').then(r => r.json())
     setRows(data)
     setLoading(false)
+  }
+
+  async function updateAllLicenses() {
+    setUpdatingAll(true)
+    setUpdateMsg('Checking all Baltimore County licenses…')
+    try {
+      const res = await fetch('/api/compliance/update-all-licenses', { method: 'POST' })
+      const data = await res.json()
+      setUpdateMsg(`Updated ${data.updated} properties`)
+      await load()
+    } catch {
+      setUpdateMsg('Update failed')
+    } finally {
+      setUpdatingAll(false)
+    }
   }
 
   async function runCheck(endpoint: string, key: string, label: string) {
@@ -103,6 +120,10 @@ export default function Compliance() {
       <div className="toolbar">
         <h1>Compliance</h1>
         <button className="btn btn-ghost" onClick={load}>⟳ Refresh</button>
+        <button className="btn btn-primary" disabled={updatingAll} onClick={updateAllLicenses}>
+          {updatingAll ? '⟳ Checking…' : 'Update All Licenses'}
+        </button>
+        {updateMsg && <span style={{ fontSize: 13, color: '#2563eb' }}>{updateMsg}</span>}
       </div>
 
       <div className="stats-grid" style={{ marginBottom: 24 }}>
