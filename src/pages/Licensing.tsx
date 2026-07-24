@@ -60,7 +60,9 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
           <thead>
             <tr>
               <Th col="name">Property</Th><th>Address</th><Th col="municipality">Municipality</Th>
-              <Th col="license_number">License #</Th><Th col="status">Status</Th><Th col="issue_date">Issued</Th><Th col="exp_date">Expires</Th><th>Letter</th><Th col="scraped_at">Last Checked</Th><th>Actions</th>
+              <Th col="license_number">License #</Th><Th col="status">License</Th><Th col="issue_date">Issued</Th><Th col="exp_date">Expires</Th>
+              <Th col="reg_status">Registration</Th><Th col="reg_exp_date">Reg Expires</Th>
+              <th>Letter</th><Th col="scraped_at">Last Checked</Th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -79,6 +81,14 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
                 </td>
                 <td>{r.issue_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
                 <td>{r.exp_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
+                <td style={{
+                  background: r.municipality === 'baltimore_city' ? (STATUS_BG[r.reg_status] || '#f3f4f6') : undefined,
+                  color: r.municipality === 'baltimore_city' ? (STATUS_TEXT[r.reg_status] || '#6b7280') : '#9ca3af',
+                  fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap',
+                }}>
+                  {r.municipality === 'baltimore_city' ? (r.reg_status ? r.reg_status.replace('_', ' ') : 'never checked') : 'n/a'}
+                </td>
+                <td>{r.municipality === 'baltimore_city' ? (r.reg_exp_date || <span style={{color:'#9ca3af'}}>—</span>) : <span style={{color:'#9ca3af'}}>—</span>}</td>
                 <td>{r.has_letter ? <a href={`/api/compliance/rental-license/letter/${r.id}/${r.municipality}`} target="_blank" rel="noreferrer">📄</a> : <span style={{color:'#9ca3af'}}>—</span>}</td>
                 <td style={{ fontSize: 12, color: '#6b7280' }}>{r.scraped_at ? r.scraped_at.slice(0, 10) : '—'}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>

@@ -63,30 +63,29 @@ async function scrapeRentalLicenseBaltimoreCity(property) {
       return { license_number: null, status: 'not_found', exp_date: null };
     }
 
-    // Prefer licensed rows, then latest expiration
-    features.sort((a, b) => {
-      const aYes = a.LicenceOrRegistration === 'Yes' ? 1 : 0;
-      const bYes = b.LicenceOrRegistration === 'Yes' ? 1 : 0;
-      if (aYes !== bYes) return bYes - aYes;
-      return (b.LicenseExpirationDate || 0) - (a.LicenseExpirationDate || 0);
-    });
-    const f = features[0];
+    // "Yes" rows are the rental LICENSE; "No" rows are the REGISTRATION record.
+    const toEntry = f => {
+      if (!f) return null;
+      const expDate = msToDate(f.LicenseExpirationDate);
+      return {
+        license_number: f.RecordNUMBER != null ? String(f.RecordNUMBER) : null,
+        status: expDate && new Date(expDate) < new Date() ? 'expired' : 'active',
+        issue_date: msToDate(f.LicenseIssuedDate),
+        exp_date: expDate,
+        dwelling_count: f.DwellingCount ?? null,
+        block_lot: f.BlockLot || null,
+      };
+    };
+    const latest = rows => rows.sort((a, b) => (b.LicenseExpirationDate || 0) - (a.LicenseExpirationDate || 0))[0];
 
-    const expDate = msToDate(f.LicenseExpirationDate);
-    const issueDate = msToDate(f.LicenseIssuedDate);
-    const licensed = f.LicenceOrRegistration === 'Yes';
-    let status;
-    if (!licensed) status = 'not_licensed';
-    else if (expDate && new Date(expDate) < new Date()) status = 'expired';
-    else status = 'active';
+    const license = toEntry(latest(features.filter(f => f.LicenceOrRegistration === 'Yes')));
+    const registration = toEntry(latest(features.filter(f => f.LicenceOrRegistration === 'No')));
 
+    // Back-compat top-level fields = license (falls back to not_licensed if only registered)
     return {
-      license_number: f.RecordNUMBER != null ? String(f.RecordNUMBER) : null,
-      status,
-      issue_date: issueDate,
-      exp_date: expDate,
-      dwelling_count: f.DwellingCount ?? null,
-      block_lot: f.BlockLot || null,
+      ...(license || { license_number: registration?.license_number || null, status: 'not_licensed', issue_date: registration?.issue_date || null, exp_date: null }),
+      license,
+      registration,
     };
   } catch (err) {
     return { error: `Baltimore City reg/license error: ${err.message}` };
