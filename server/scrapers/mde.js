@@ -231,10 +231,16 @@ async function scrapeMdeCertificate(property) {
       const parseUs = d => { const m = (d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(`${m[3]}-${m[1]}-${m[2]}`).getTime() : 0; };
       dataRows.sort((a, b) => parseUs(b[6]) - parseUs(a[6]));
 
-      // Group by unit (col 1) and keep the latest inspection per unit
+      // Group by unit (col 1) and keep the latest inspection per unit.
+      // Normalize labels first — LRCA mixes "2B" and "1401: 2B" for the same unit
+      // across cert generations, which would otherwise double-count units.
+      const normUnit = u => (u || '').trim().toUpperCase()
+        .replace(/^\d+\s*[:\-]\s*/, '')   // strip leading house-number prefix "1401:"
+        .replace(/^(APT|UNIT|STE)\s+/i, '')
+        .replace(/\s+/g, ' ').trim();
       const byUnit = new Map();
       for (const row of dataRows) {
-        const unit = (row[1] || '').trim();
+        const unit = normUnit(row[1]);
         if (!byUnit.has(unit)) byUnit.set(unit, row); // rows are sorted newest-first
       }
       const units = [...byUnit.entries()].map(([unit, r]) => ({
