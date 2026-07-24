@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 
 type Status = 'green' | 'yellow' | 'red' | 'unknown' | 'na'
-type SortCol = 'name' | 'municipality' | 'year_built' | 'water' | 'rental_license' | 'city_registration' | 'lead'
+type SortCol = 'name' | 'municipality' | 'year_built' | 'water' | 'rental_license' | 'city_registration' | 'lead_registration' | 'lead_cert'
 
 interface ComplianceItem { status: Status; label: string }
 interface PropertyRow {
@@ -134,13 +134,14 @@ export default function Compliance({ onEditProperty }: Props) {
       else if (sortCol === 'water') cmp = STATUS_ORDER[a.water.status] - STATUS_ORDER[b.water.status]
       else if (sortCol === 'rental_license') cmp = STATUS_ORDER[a.rental_license.status] - STATUS_ORDER[b.rental_license.status]
       else if (sortCol === 'city_registration') cmp = STATUS_ORDER[a.city_registration.status] - STATUS_ORDER[b.city_registration.status]
-      else if (sortCol === 'lead') cmp = STATUS_ORDER[a.lead.status] - STATUS_ORDER[b.lead.status]
+      else if (sortCol === 'lead_registration') cmp = STATUS_ORDER[a.lead_registration.status] - STATUS_ORDER[b.lead_registration.status]
+      else if (sortCol === 'lead_cert') cmp = STATUS_ORDER[a.lead_cert.status] - STATUS_ORDER[b.lead_cert.status]
       return sortDir === 'asc' ? cmp : -cmp
     })
   }, [rows, q, sortCol, sortDir])
 
   const summary = rows.reduce((acc, r) => {
-    for (const field of ['water', 'rental_license', 'lead'] as const) {
+    for (const field of ['water', 'rental_license', 'city_registration', 'lead_registration', 'lead_cert'] as const) {
       const s = r[field].status
       if (s === 'red') acc.red++
       else if (s === 'yellow') acc.yellow++
@@ -200,7 +201,8 @@ export default function Compliance({ onEditProperty }: Props) {
               <Th col="water">Water Bills</Th>
               <Th col="rental_license">Rental License</Th>
               <Th col="city_registration">Registration</Th>
-              <Th col="lead">Lead Compliance</Th>
+              <Th col="lead_registration">Lead Registration</Th>
+              <Th col="lead_cert">Lead Certificate</Th>
               <th style={{ whiteSpace: 'nowrap' }}>Actions</th>
             </tr>
           </thead>
@@ -225,7 +227,8 @@ export default function Compliance({ onEditProperty }: Props) {
                 <StatusCell item={r.water} />
                 <StatusCell item={r.rental_license} />
                 <StatusCell item={r.city_registration} />
-                <StatusCell item={r.lead} />
+                <StatusCell item={r.lead_registration} />
+                <StatusCell item={r.lead_cert} />
                 <td style={{ whiteSpace: 'nowrap' }}>
                   <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', gap: 4, alignItems: 'center' }}>
                     {!r.year_built && (

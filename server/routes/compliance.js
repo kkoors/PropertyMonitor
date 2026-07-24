@@ -95,7 +95,8 @@ function registrationStatus(registrations) {
   return { status: 'yellow', label: r.status };
 }
 
-function leadStatus(property, leadRecords, leadUnits = []) {
+// Shared gating for both lead columns — commercial/not-monitored/post-1978/lead-free
+function leadGate(property) {
   if (property.commercial) return { status: 'na', label: 'Commercial' };
   if (property.lead_not_monitored) return { status: 'na', label: 'Not monitored' };
   const yearBuilt = property.year_built;
@@ -110,61 +111,63 @@ function leadStatus(property, leadRecords, leadUnits = []) {
     if (daysLeft < 60) return { status: 'yellow', label: `Lead-free cert exp in ${daysLeft}d` };
     return { status: 'green', label: `Lead-free cert exp ${exp}` };
   }
+  return null; // no gate — evaluate normally
+}
 
-  if (leadRecords.length === 0) return { status: 'red', label: 'No lead records' };
+// MDE lead REGISTRATION: annual fee. Shows the year paid; must cover current year.
+function leadRegistrationStatus(property, leadRecords) {
+  const gate = leadGate(property);
+  if (gate) return gate;
+
+  if (leadRecords.length === 0) return { status: 'unknown', label: 'Not checked' };
   const latest = leadRecords[0];
-  const exp = latest.cert_exp_date;
-  if (exp) {
-    const daysLeft = DAYS(new Date(exp) - new Date());
-    if (daysLeft < 0) return { status: 'red', label: `Cert expired ${exp}` };
-    if (daysLeft < 60) return { status: 'yellow', label: `Cert exp in ${daysLeft}d` };
-    return { status: 'green', label: `Cert exp ${exp}` };
-  }
   const registered = latest.registration_status && latest.registration_status !== 'not_found';
-  const certPassed = (latest.cert_status || '').toUpperCase().includes('PASS');
-  const currentYear = new Date().getFullYear();
-
-  // Annual renewal: MDE payment year must cover the current year (or next)
-  const payYear = latest.payment_year ? Number(latest.payment_year) : null;
-  const renewalCurrent = payYear !== null
-    ? payYear >= currentYear
-    : (latest.registration_date && new Date(latest.registration_date).getFullYear() === currentYear); // fallback if no history
+  if (!registered) return { status: 'red', label: 'Not registered' };
 
   // Registration must be under the CURRENT owner, at the owner's mailing address on file
-  const ownerNameOk = looseMatch(property.owner_name, latest.owner_name);
-  const ownerAddrOk = looseMatch(property.owner_address, latest.owner_address);
-
-  if (registered && ownerNameOk === false) {
+  if (looseMatch(property.owner_name, latest.owner_name) === false) {
     return { status: 'red', label: `Registered to prior owner (${latest.owner_name})` };
   }
-  if (registered && ownerAddrOk === false) {
-    return { status: 'red', label: `MDE owner address mismatch (${latest.owner_address})` };
-  }
-  if (registered && !renewalCurrent) {
-    const lastRenewed = latest.bank_date || latest.registration_date;
-    return { status: 'red', label: lastRenewed ? `Last renewed ${lastRenewed}` : `Registration not renewed for ${currentYear}` };
+  if (looseMatch(property.owner_address, latest.owner_address) === false) {
+    return { status: 'red', label: `Owner address mismatch (${latest.owner_address})` };
   }
 
-  // Multifamily: every unit's latest cert must be PASSED
-  if (property.multifamily && registered && renewalCurrent) {
+  const currentYear = new Date().getFullYear();
+  const payYear = latest.payment_year ? Number(latest.payment_year) : null;
+  if (payYear !== null) {
+    if (payYear >= currentYear) return { status: 'green', label: String(payYear) };
+    const lastRenewed = latest.bank_date || latest.registration_date;
+    return { status: 'red', label: lastRenewed ? `${payYear} — last renewed ${lastRenewed}` : String(payYear) };
+  }
+  // No payment-year history — fall back to registration date year
+  const regYear = latest.registration_date ? new Date(latest.registration_date).getFullYear() : null;
+  if (regYear === currentYear) return { status: 'green', label: String(regYear) };
+  return { status: 'yellow', label: `Registered ${latest.registration_date || ''} — payment year unknown` };
+}
+
+// Lead CERTIFICATE: inspection required at every tenant turnover — independent of registration.
+function leadCertStatus(property, leadRecords, leadUnits = []) {
+  const gate = leadGate(property);
+  if (gate) return gate;
+
+  // Multifamily: judge per-unit certs
+  if (property.multifamily) {
     const total = leadUnits.length;
+    if (total === 0) return { status: 'yellow', label: 'No unit certs on file' };
     const passed = leadUnits.filter(u => (u.cert_status || '').toUpperCase().includes('PASS')).length;
     const failed = leadUnits.filter(u => (u.cert_status || '').toUpperCase().includes('FAIL'));
-    const ownerNote = (ownerNameOk === null || ownerAddrOk === null) ? ' · owner not verified' : '';
-    if (total === 0) return { status: 'yellow', label: `Paid thru ${payYear || currentYear} · no unit certs${ownerNote}` };
-    if (failed.length > 0) return { status: 'red', label: `Unit ${failed.map(u => u.unit).join(', ')} cert FAILED (${passed}/${total} passed)` };
-    if (passed === total) return { status: ownerNote ? 'yellow' : 'green', label: `Paid thru ${payYear || currentYear} · ${passed}/${total} units passed${ownerNote}` };
-    return { status: 'yellow', label: `Paid thru ${payYear || currentYear} · ${passed}/${total} units passed${ownerNote}` };
+    if (failed.length > 0) return { status: 'red', label: `Unit ${failed.map(u => u.unit).join(', ')} FAILED (${passed}/${total} passed)` };
+    if (passed === total) return { status: 'green', label: `${passed}/${total} units passed` };
+    return { status: 'yellow', label: `${passed}/${total} units passed` };
   }
 
-  if (registered && renewalCurrent) {
-    const ownerNote = (ownerNameOk === null || ownerAddrOk === null) ? ' · owner not verified' : '';
-    if (certPassed) return { status: ownerNote ? 'yellow' : 'green', label: `Paid thru ${payYear || currentYear} · Cert ${latest.cert_number} passed${ownerNote}` };
-    return { status: 'yellow', label: `Paid thru ${payYear || currentYear} · no cert${ownerNote}` };
-  }
-  if (certPassed) return { status: 'yellow', label: `Cert ${latest.cert_number} passed · not registered` };
-  if (latest.inspection_date) return { status: 'green', label: `Inspected ${latest.inspection_date}` };
-  return { status: 'yellow', label: 'Lead record on file' };
+  if (leadRecords.length === 0) return { status: 'unknown', label: 'Not checked' };
+  const latest = leadRecords[0];
+  if (!latest.cert_number) return { status: 'yellow', label: 'No inspection cert on file' };
+  const passed = (latest.cert_status || '').toUpperCase().includes('PASS');
+  const when = latest.inspection_date ? ` ${latest.inspection_date}` : '';
+  if (passed) return { status: 'green', label: `${latest.cert_number} passed${when}` };
+  return { status: 'red', label: `${latest.cert_number} ${latest.cert_status || 'FAILED'}${when}` };
 }
 
 module.exports = function makeComplianceRouter(db) {
@@ -205,7 +208,8 @@ module.exports = function makeComplianceRouter(db) {
           ? registrationStatus(registrations)
           : { status: 'na', label: 'N/A' },
         rental_license_has_letter: licenses.some(l => l.municipality === p.municipality && l.has_letter),
-        lead: leadStatus(p, leadRecords, leadUnits),
+        lead_registration: leadRegistrationStatus(p, leadRecords),
+        lead_cert: leadCertStatus(p, leadRecords, leadUnits),
       };
     });
 
