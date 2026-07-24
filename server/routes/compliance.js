@@ -500,8 +500,8 @@ module.exports = function makeComplianceRouter(db) {
     const result = await lookupSdatMailing(property);
     if (result.error) return res.status(422).json({ error: result.error });
 
-    db.prepare(`UPDATE properties SET sdat_mailing_address = ?, sdat_checked_at = datetime('now'), tax_id = COALESCE(NULLIF(tax_id, ''), ?) WHERE id = ?`)
-      .run(result.mailing_address, result.tax_id, property.id);
+    db.prepare(`UPDATE properties SET sdat_mailing_address = ?, sdat_checked_at = datetime('now'), tax_id = COALESCE(NULLIF(tax_id, ''), ?), owner_name = COALESCE(NULLIF(owner_name, ''), ?) WHERE id = ?`)
+      .run(result.mailing_address, result.tax_id, result.owner_name || null, property.id);
 
     const updated = db.prepare(`SELECT id, name, address, municipality, owner_name, owner_address, tax_id, sdat_mailing_address, sdat_checked_at FROM properties WHERE id = ?`).get(property.id);
     res.json({ ...updated, flag: taxAddressFlag(updated) });
@@ -513,8 +513,8 @@ module.exports = function makeComplianceRouter(db) {
     for (const property of props) {
       const result = await lookupSdatMailing(property);
       if (!result.error) {
-        db.prepare(`UPDATE properties SET sdat_mailing_address = ?, sdat_checked_at = datetime('now'), tax_id = COALESCE(NULLIF(tax_id, ''), ?) WHERE id = ?`)
-          .run(result.mailing_address, result.tax_id, property.id);
+        db.prepare(`UPDATE properties SET sdat_mailing_address = ?, sdat_checked_at = datetime('now'), tax_id = COALESCE(NULLIF(tax_id, ''), ?), owner_name = COALESCE(NULLIF(owner_name, ''), ?) WHERE id = ?`)
+          .run(result.mailing_address, result.tax_id, result.owner_name || null, property.id);
       }
       results.push({ id: property.id, name: property.name, ...result });
     }

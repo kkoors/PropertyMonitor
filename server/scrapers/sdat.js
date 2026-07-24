@@ -189,6 +189,49 @@ function nameVariants(nameOnly) {
   return [...out];
 }
 
+// Owner NAME isn't in the statewide layer — pull it from the county GIS layers
+// (the same ones used for year-built).
+async function lookupOwnerName(property, parsed) {
+  const cfgs = {
+    baltimore_city: {
+      url: BCITY_REALPROP,
+      fields: 'OWNER_1,OWNER_2,OWNER_3',
+      where: n => `BLDG_NO='${parsed.number}' AND UPPER(ST_NAME) LIKE '${n}%'`,
+      pick: f => [f.OWNER_1, f.OWNER_2, f.OWNER_3].filter(Boolean).join(' ').trim(),
+    },
+    baltimore_county: {
+      url: BC_TAX_PARCEL,
+      fields: 'FULL_OWNER_NAME,OWNER_NA1,OWNER_NA2',
+      where: n => `ST_NUM='${parsed.number}' AND UPPER(STREETNAME) LIKE '${n}%'`,
+      pick: f => f.FULL_OWNER_NAME || [f.OWNER_NA1, f.OWNER_NA2].filter(Boolean).join(' & ').trim(),
+    },
+    harford: {
+      url: HC_CADASTRAL,
+      fields: 'OWN_1,OWN_2',
+      where: n => `P_ST_NO=${parsed.number} AND UPPER(P_ST_NAME) LIKE '${n}%'`,
+      pick: f => [f.OWN_1, f.OWN_2].filter(Boolean).join(' & ').trim(),
+    },
+  };
+  const cfg = cfgs[property.municipality];
+  if (!cfg) return null;
+
+  for (const variant of nameVariants(parsed.nameOnly)) {
+    try {
+      const params = new URLSearchParams({ where: cfg.where(variant.replace(/'/g, "''")), outFields: cfg.fields, f: 'json', resultRecordCount: '3' });
+      const res = await fetch(`${cfg.url}?${params}`, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.error || !data.features?.length) continue;
+      const name = cfg.pick(data.features[0].attributes);
+      if (name) {
+        console.log(`[sdat-owner] ${property.municipality} '${variant}': ${name}`);
+        return name;
+      }
+    } catch { /* try next variant */ }
+  }
+  return null;
+}
+
 async function lookupSdatMailing(property) {
   const jurs = JURSCODES[property.municipality];
   if (!jurs) return { error: `No jurisdiction code for: ${property.municipality}` };
@@ -229,10 +272,13 @@ async function lookupSdatMailing(property) {
       f.OWNERZIP || '',
     ].filter(Boolean).join(', ').replace(/\s+/g, ' ').trim();
 
+    const ownerName = await lookupOwnerName(property, parsed);
+
     return {
       tax_id: f.ACCTID || null,
       mailing_address: mailing || null,
       parcel_address: f.ADDRESS || null,
+      owner_name: ownerName,
     };
   } catch (err) {
     return { error: `SDAT mailing lookup error: ${err.message}` };
