@@ -12,10 +12,10 @@ function makeRunScrapers(db) {
     const properties = db.prepare(`SELECT * FROM properties WHERE active = 1 AND private_ws = 0`).all();
     let billsFound = 0, errors = 0;
     const log = [];
-
-    const browser = await chromium.launch({ headless: true });
+    let browser = null;
 
     try {
+      browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
       for (const property of properties) {
         log.push(`[${new Date().toISOString()}] Checking: ${property.name} (${property.municipality})`);
 
@@ -54,15 +54,17 @@ function makeRunScrapers(db) {
           errors++;
         }
       }
+    } catch (err) {
+      log.push(`RUN FAILED: ${err.message}`);
+      errors++;
     } finally {
-      await browser.close();
+      if (browser) await browser.close().catch(() => {});
+      db.prepare(`
+        UPDATE scrape_runs
+        SET finished_at = datetime('now'), properties_checked = ?, bills_found = ?, errors = ?, log = ?
+        WHERE id = ?
+      `).run(properties.length, billsFound, errors, log.join('\n'), runId);
     }
-
-    db.prepare(`
-      UPDATE scrape_runs
-      SET finished_at = datetime('now'), properties_checked = ?, bills_found = ?, errors = ?, log = ?
-      WHERE id = ?
-    `).run(properties.length, billsFound, errors, log.join('\n'), runId);
 
     return { runId, propertiesChecked: properties.length, billsFound, errors };
   };
@@ -120,8 +122,9 @@ function makeRunOne(db) {
     let billsFound = 0, errors = 0;
 
     const needsBrowser = property.municipality === 'baltimore_city' || property.municipality === 'baltimore_county';
-    const browser = needsBrowser ? await require('playwright').chromium.launch({ headless: true }) : null;
+    let browser = null;
     try {
+      if (needsBrowser) browser = await require('playwright').chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
       let result;
       if (needsBrowser) {
         result = await require('./baltimore').scrapeBaltimore(property, browser);
@@ -149,15 +152,17 @@ function makeRunOne(db) {
           }
         }
       }
+    } catch (err) {
+      log.push(`RUN FAILED: ${err.message}`);
+      errors++;
     } finally {
-      if (browser) await browser.close();
+      if (browser) await browser.close().catch(() => {});
+      db.prepare(`
+        UPDATE scrape_runs
+        SET finished_at = datetime('now'), properties_checked = 1, bills_found = ?, errors = ?, log = ?
+        WHERE id = ?
+      `).run(billsFound, errors, log.join('\n'), runId);
     }
-
-    db.prepare(`
-      UPDATE scrape_runs
-      SET finished_at = datetime('now'), properties_checked = 1, bills_found = ?, errors = ?, log = ?
-      WHERE id = ?
-    `).run(billsFound, errors, log.join('\n'), runId);
 
     return { runId, billsFound, errors, log };
   };

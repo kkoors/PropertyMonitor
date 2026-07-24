@@ -94,16 +94,14 @@ export default function App() {
           <span style={{ fontSize: settings.logo ? 12 : undefined }}>{settings.app_name || DEFAULT_NAME}</span>
         </div>
         <div className="nav-links">
-          <div className="nav-section">Compliance</div>
-          {nav('compliance', 'Compliance')}
+          {nav('compliance', 'Compliance Dashboard')}
           {nav('licensing', 'Licensing')}
           {nav('lead', 'Lead Registry')}
           {nav('taxaddress', 'Tax Address')}
           {nav('properties', 'Properties')}
           {nav('lookup', 'Address Lookup')}
-          <div className="nav-section">Water</div>
           {nav('dashboard', 'Water Dashboard')}
-          {nav('bills', 'Bills')}
+          {nav('bills', 'Water Bills')}
           {nav('scrapes', 'Scrape History')}
           <div className="nav-section">Settings</div>
           {nav('admin', 'Admin')}

@@ -21,6 +21,9 @@ async function start() {
   const db = await createDb(path.join(__dirname, '..', 'water-bills.db'));
   initSchema(db);
 
+  // Any run still open at startup died mid-run (restart/crash) — close it out
+  db.prepare(`UPDATE scrape_runs SET finished_at = started_at, log = COALESCE(NULLIF(log, ''), 'aborted — server restarted mid-run') WHERE finished_at IS NULL`).run();
+
   const runAllScrapers = makeRunScrapers(db);
   const runOneProperty = makeRunOne(db);
 
