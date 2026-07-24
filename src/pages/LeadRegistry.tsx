@@ -14,6 +14,8 @@ function MatchBadge({ ok, label }: { ok: boolean | null; label: string }) {
 export default function LeadRegistry() {
   const [rows, setRows] = useState<any[]>([])
   const [checking, setChecking] = useState<number | null>(null)
+  const [checkingAll, setCheckingAll] = useState(false)
+  const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => { load() }, [])
@@ -34,10 +36,35 @@ export default function LeadRegistry() {
 
   const monitored = rows.filter(r => !r.commercial && !r.lead_not_monitored && (!r.year_built || r.year_built < 1978))
 
+  async function checkAll() {
+    setCheckingAll(true); setError('')
+    const errors: string[] = []
+    try {
+      for (let i = 0; i < monitored.length; i++) {
+        const r = monitored[i]
+        setProgress(`${i + 1}/${monitored.length} — ${r.name}`)
+        setChecking(r.id)
+        try {
+          const res = await fetch(`/api/compliance/mde/${r.id}`, { method: 'POST' })
+          if (!res.ok) { const e = await res.json(); errors.push(`${r.name}: ${e.error}`) }
+        } catch (e: any) {
+          errors.push(`${r.name}: ${e.message}`)
+        }
+      }
+      if (errors.length) setError(errors.join(' | '))
+      await load()
+    } finally {
+      setChecking(null); setCheckingAll(false); setProgress('')
+    }
+  }
+
   return (
     <div>
       <div className="toolbar">
         <h1>Lead Registry (MDE)</h1>
+        <button className="btn btn-primary" onClick={checkAll} disabled={checkingAll}>
+          {checkingAll ? `Checking ${progress}…` : '⟳ Check All'}
+        </button>
       </div>
       {error && <div className="card" style={{ color: '#991b1b', fontSize: 13 }}>{error}</div>}
       <div className="card" style={{ overflowX: 'auto' }}>
