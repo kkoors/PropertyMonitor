@@ -8,7 +8,7 @@ const MUNICIPALITIES = [
   { value: 'harford', label: 'Harford County' },
 ]
 
-const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '', owner_name: '', owner_address: '', commercial: false }
+const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '', owner_name: '', owner_address: '', commercial: false, multifamily: false, lead_not_monitored: false, license_not_monitored: false }
 
 interface Props {
   editPropertyId?: number | null
@@ -54,6 +54,9 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
       year_built: form.year_built ? Number(form.year_built) : null,
       lead_free: form.lead_free ? 1 : 0,
       commercial: form.commercial ? 1 : 0,
+      multifamily: form.multifamily ? 1 : 0,
+      lead_not_monitored: form.lead_not_monitored ? 1 : 0,
+      license_not_monitored: form.license_not_monitored ? 1 : 0,
       owner_name: form.owner_name || null,
       owner_address: form.owner_address || null,
       lead_free_cert_date: form.lead_free_cert_date || null,
@@ -66,7 +69,7 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
   }
 
   function startEdit(p: any) {
-    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '', owner_name: p.owner_name || '', owner_address: p.owner_address || '', commercial: !!p.commercial })
+    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '', owner_name: p.owner_name || '', owner_address: p.owner_address || '', commercial: !!p.commercial, multifamily: !!p.multifamily, lead_not_monitored: !!p.lead_not_monitored, license_not_monitored: !!p.license_not_monitored })
     setEditId(p.id)
     setShowForm(true)
   }
@@ -192,6 +195,27 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
                 Commercial
               </label>
               <span style={{ fontSize: 11, color: '#9ca3af' }}>No rental license or lead compliance needed</span>
+            </div>
+            <div className="form-group" style={{ justifyContent: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
+                <input type="checkbox" checked={form.multifamily} onChange={e => setForm(f => ({ ...f, multifamily: e.target.checked }))} />
+                Multifamily
+              </label>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>Pull lead certs for every unit</span>
+            </div>
+            <div className="form-group" style={{ justifyContent: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
+                <input type="checkbox" checked={form.lead_not_monitored} onChange={e => setForm(f => ({ ...f, lead_not_monitored: e.target.checked }))} />
+                Lead Not Monitored
+              </label>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>Not rented — skip lead compliance</span>
+            </div>
+            <div className="form-group" style={{ justifyContent: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
+                <input type="checkbox" checked={form.license_not_monitored} onChange={e => setForm(f => ({ ...f, license_not_monitored: e.target.checked }))} />
+                License Not Monitored
+              </label>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>Not rented — skip rental license</span>
             </div>
             <div className="form-group">
               <label>Year Built</label>

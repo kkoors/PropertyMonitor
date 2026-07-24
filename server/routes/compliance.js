@@ -54,8 +54,9 @@ function looseMatch(a, b) {
   return hits >= Math.max(1, small.size - 1);
 }
 
-function leadStatus(property, leadRecords) {
+function leadStatus(property, leadRecords, leadUnits = []) {
   if (property.commercial) return { status: 'na', label: 'Commercial' };
+  if (property.lead_not_monitored) return { status: 'na', label: 'Not monitored' };
   const yearBuilt = property.year_built;
   if (yearBuilt && yearBuilt >= 1978) return { status: 'na', label: 'Post-1978' };
   if (!yearBuilt) return { status: 'unknown', label: 'Year built unknown' };
@@ -99,8 +100,22 @@ function leadStatus(property, leadRecords) {
     return { status: 'red', label: `MDE owner address mismatch (${latest.owner_address})` };
   }
   if (registered && !renewalCurrent) {
-    return { status: 'red', label: payYear ? `Renewal lapsed — paid through ${payYear}` : `Registration not renewed for ${currentYear}` };
+    const lastRenewed = latest.bank_date || latest.registration_date;
+    return { status: 'red', label: lastRenewed ? `Last renewed ${lastRenewed}` : `Registration not renewed for ${currentYear}` };
   }
+
+  // Multifamily: every unit's latest cert must be PASSED
+  if (property.multifamily && registered && renewalCurrent) {
+    const total = leadUnits.length;
+    const passed = leadUnits.filter(u => (u.cert_status || '').toUpperCase().includes('PASS')).length;
+    const failed = leadUnits.filter(u => (u.cert_status || '').toUpperCase().includes('FAIL'));
+    const ownerNote = (ownerNameOk === null || ownerAddrOk === null) ? ' · owner not verified' : '';
+    if (total === 0) return { status: 'yellow', label: `Paid thru ${payYear || currentYear} · no unit certs${ownerNote}` };
+    if (failed.length > 0) return { status: 'red', label: `Unit ${failed.map(u => u.unit).join(', ')} cert FAILED (${passed}/${total} passed)` };
+    if (passed === total) return { status: ownerNote ? 'yellow' : 'green', label: `Paid thru ${payYear || currentYear} · ${passed}/${total} units passed${ownerNote}` };
+    return { status: 'yellow', label: `Paid thru ${payYear || currentYear} · ${passed}/${total} units passed${ownerNote}` };
+  }
+
   if (registered && renewalCurrent) {
     const ownerNote = (ownerNameOk === null || ownerAddrOk === null) ? ' · owner not verified' : '';
     if (certPassed) return { status: ownerNote ? 'yellow' : 'green', label: `Paid thru ${payYear || currentYear} · Cert ${latest.cert_number} passed${ownerNote}` };
@@ -126,9 +141,11 @@ module.exports = function makeComplianceRouter(db) {
 
     const result = properties.map(p => {
       const licenses = db.prepare(`SELECT id, municipality, license_type, license_number, status, issue_date, exp_date, scraped_at, notes, (confirmation_letter IS NOT NULL) as has_letter FROM rental_licenses WHERE property_id = ?`).all(p.id);
-      const leadRecords = db.prepare(`SELECT * FROM lead_records WHERE property_id = ? ORDER BY inspection_date DESC`).all(p.id);
+      const allLead = db.prepare(`SELECT * FROM lead_records WHERE property_id = ? ORDER BY inspection_date DESC`).all(p.id);
+      const leadRecords = allLead.filter(r => r.source !== 'mde-unit');
+      const leadUnits = allLead.filter(r => r.source === 'mde-unit');
 
-      const needsRentalLicense = !p.commercial && (p.municipality === 'baltimore_city' || p.municipality === 'baltimore_county');
+      const needsRentalLicense = !p.commercial && !p.license_not_monitored && (p.municipality === 'baltimore_city' || p.municipality === 'baltimore_county');
 
       return {
         id: p.id,
@@ -139,9 +156,9 @@ module.exports = function makeComplianceRouter(db) {
         lead_free: p.lead_free,
         private_ws: p.private_ws,
         water: billStatus(p),
-        rental_license: needsRentalLicense ? rentalLicenseStatus(licenses, p.municipality) : { status: 'na', label: p.commercial ? 'Commercial' : 'N/A' },
+        rental_license: needsRentalLicense ? rentalLicenseStatus(licenses, p.municipality) : { status: 'na', label: p.commercial ? 'Commercial' : (p.license_not_monitored ? 'Not monitored' : 'N/A') },
         rental_license_has_letter: licenses.some(l => l.municipality === p.municipality && l.has_letter),
-        lead: leadStatus(p, leadRecords),
+        lead: leadStatus(p, leadRecords, leadUnits),
       };
     });
 
@@ -282,6 +299,15 @@ module.exports = function makeComplianceRouter(db) {
       } else {
         db.prepare(`INSERT INTO lead_records (property_id, tracking_id, registration_date, registration_status, cert_number, cert_status, inspection_date, owner_name, owner_address, bank_date, payment_year, notes, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'mde')`)
           .run(property.id, vals.tracking_id, vals.registration_date, vals.registration_status, vals.cert_number, vals.cert_status, vals.inspection_date, vals.owner_name, vals.owner_address, vals.bank_date, vals.payment_year, notes);
+      }
+
+      // Multifamily: store one record per unit (latest cert each)
+      if (property.multifamily && certFound && Array.isArray(cert.units)) {
+        db.prepare(`DELETE FROM lead_records WHERE property_id = ? AND source = 'mde-unit'`).run(property.id);
+        const ins = db.prepare(`INSERT INTO lead_records (property_id, unit, cert_number, cert_status, inspection_date, source) VALUES (?,?,?,?,?,'mde-unit')`);
+        for (const u of cert.units) {
+          ins.run(property.id, u.unit || '', u.cert_number, u.cert_status, normalizeUsDate(u.inspection_date));
+        }
       }
     }
 

@@ -163,6 +163,10 @@ function initSchema(db) {
   if (!ownerCols.includes('owner_name')) db.prepare(`ALTER TABLE properties ADD COLUMN owner_name TEXT`).run();
   if (!ownerCols.includes('owner_address')) db.prepare(`ALTER TABLE properties ADD COLUMN owner_address TEXT`).run();
   if (!ownerCols.includes('commercial')) db.prepare(`ALTER TABLE properties ADD COLUMN commercial INTEGER NOT NULL DEFAULT 0`).run();
+  if (!ownerCols.includes('multifamily')) db.prepare(`ALTER TABLE properties ADD COLUMN multifamily INTEGER NOT NULL DEFAULT 0`).run();
+  if (!ownerCols.includes('lead_not_monitored')) db.prepare(`ALTER TABLE properties ADD COLUMN lead_not_monitored INTEGER NOT NULL DEFAULT 0`).run();
+  if (!ownerCols.includes('license_not_monitored')) db.prepare(`ALTER TABLE properties ADD COLUMN license_not_monitored INTEGER NOT NULL DEFAULT 0`).run();
+  if (!leadCols.includes('unit')) db.prepare(`ALTER TABLE lead_records ADD COLUMN unit TEXT`).run();
 
   // Migrations for existing databases
   const billCols = db._db.exec(`PRAGMA table_info(bills)`)[0]?.values.map(r => r[1]) || [];

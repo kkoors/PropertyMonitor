@@ -187,9 +187,23 @@ async function scrapeMdeCertificate(property) {
     console.log(`[mde-lrca] ${parsed.number} ${parsed.name}: ${dataRows.length} certificate rows`);
 
     if (dataRows.length > 0) {
-      // Pick the most recent inspection
       const parseUs = d => { const m = (d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(`${m[3]}-${m[1]}-${m[2]}`).getTime() : 0; };
       dataRows.sort((a, b) => parseUs(b[6]) - parseUs(a[6]));
+
+      // Group by unit (col 1) and keep the latest inspection per unit
+      const byUnit = new Map();
+      for (const row of dataRows) {
+        const unit = (row[1] || '').trim();
+        if (!byUnit.has(unit)) byUnit.set(unit, row); // rows are sorted newest-first
+      }
+      const units = [...byUnit.entries()].map(([unit, r]) => ({
+        unit,
+        cert_number: r[7] || null,
+        cert_status: r[8] || null,
+        inspection_date: r[6] ? r[6].split(' ')[0] : null,
+      }));
+      console.log(`[mde-lrca] ${units.length} unit(s): ${units.map(u => `${u.unit || '(whole)'}=${u.cert_status}`).join(', ')}`);
+
       const best = dataRows[0];
       return {
         cert_found: true,
@@ -199,6 +213,7 @@ async function scrapeMdeCertificate(property) {
         cert_number: best[7] || null,
         cert_status: best[8] || null,
         inspection_date: best[6] ? best[6].split(' ')[0] : null,
+        units,
       };
     }
 
