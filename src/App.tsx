@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocalState } from './useLocalState'
+import Admin from './pages/Admin'
 import Dashboard from './pages/Dashboard'
 import Properties from './pages/Properties'
 import Bills from './pages/Bills'
@@ -11,11 +12,33 @@ import LeadRegistry from './pages/LeadRegistry'
 import TaxAddress from './pages/TaxAddress'
 import './app.css'
 
-type Page = 'compliance' | 'licensing' | 'lead' | 'taxaddress' | 'properties' | 'lookup' | 'bills' | 'dashboard' | 'scrapes'
+type Page = 'compliance' | 'licensing' | 'lead' | 'taxaddress' | 'properties' | 'lookup' | 'bills' | 'dashboard' | 'scrapes' | 'admin'
+
+const DEFAULT_NAME = 'KRS Property Compliance Monitor'
 
 export default function App() {
   const [page, setPage] = useLocalState<Page>('app.page.v2', 'compliance')
   const [editPropertyId, setEditPropertyId] = useState<number | null>(null)
+  const [settings, setSettings] = useState<Record<string, string>>({})
+
+  async function loadSettings() {
+    try {
+      const s = await fetch('/api/settings').then(r => r.json())
+      setSettings(s)
+      document.title = s.app_name || DEFAULT_NAME
+      const root = document.documentElement
+      if (s.primary_color) {
+        root.style.setProperty('--blue', s.primary_color)
+        root.style.setProperty('--blue-dark', s.primary_color)
+      } else {
+        root.style.removeProperty('--blue'); root.style.removeProperty('--blue-dark')
+      }
+      if (s.sidebar_color) root.style.setProperty('--sidebar-bg', s.sidebar_color)
+      else root.style.removeProperty('--sidebar-bg')
+    } catch { /* keep defaults */ }
+  }
+
+  useEffect(() => { loadSettings() }, [])
 
   function goEditProperty(id: number) {
     setEditPropertyId(id)
@@ -35,7 +58,12 @@ export default function App() {
   return (
     <div className="app">
       <nav className="nav">
-        <div className="nav-logo">🏠 Property Monitor</div>
+        <div className="nav-logo" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {settings.logo
+            ? <img src={settings.logo} alt="logo" style={{ maxHeight: 36, maxWidth: 170 }} />
+            : <span>🏠</span>}
+          <span style={{ fontSize: settings.logo ? 12 : undefined }}>{settings.app_name || DEFAULT_NAME}</span>
+        </div>
         <div className="nav-links">
           <div className="nav-section">Compliance</div>
           {nav('compliance', 'Compliance')}
@@ -48,6 +76,8 @@ export default function App() {
           {nav('dashboard', 'Water Dashboard')}
           {nav('bills', 'Bills')}
           {nav('scrapes', 'Scrape History')}
+          <div className="nav-section">Settings</div>
+          {nav('admin', 'Admin')}
         </div>
         <div className="nav-bottom">
           <a href="/auth/logout" className="nav-link" style={{ opacity: 0.6, fontSize: 12 }}>Sign out</a>
@@ -63,6 +93,7 @@ export default function App() {
         {page === 'dashboard'   && <Dashboard onNavigate={p => setPage(p as Page)} />}
         {page === 'bills'       && <Bills />}
         {page === 'scrapes'     && <ScrapeHistory />}
+        {page === 'admin'       && <Admin onSettingsSaved={loadSettings} />}
       </main>
     </div>
   )
