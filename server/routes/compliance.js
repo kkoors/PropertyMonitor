@@ -274,7 +274,7 @@ module.exports = function makeComplianceRouter(db) {
     if (!row || !row.confirmation_letter) return res.status(404).json({ error: 'No letter on file' });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="rental-registration-${req.params.propertyId}.pdf"`);
-    res.send(row.confirmation_letter);
+    res.send(Buffer.from(row.confirmation_letter));
   });
 
   // Trigger Baltimore County rental license check
@@ -451,9 +451,13 @@ module.exports = function makeComplianceRouter(db) {
       ? db.prepare(`SELECT cert_pdf FROM lead_records WHERE property_id = ? AND source = 'mde-unit' AND unit = ?`).get(req.params.propertyId, unit)
       : db.prepare(`SELECT cert_pdf FROM lead_records WHERE property_id = ? AND source = 'mde'`).get(req.params.propertyId);
     if (!row || !row.cert_pdf) return res.status(404).json({ error: 'No certificate PDF on file' });
+    const buf = Buffer.from(row.cert_pdf); // sql.js returns Uint8Array — res.send would JSON-serialize it
+    if (buf.slice(0, 4).toString() !== '%PDF') {
+      console.log(`[lead-cert-pdf] stored blob for ${req.params.propertyId}/${unit || ''} is not a PDF (starts: ${buf.slice(0, 20).toString().replace(/\n/g, ' ')})`);
+    }
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="lead-cert-${req.params.propertyId}${unit ? '-' + unit : ''}.pdf"`);
-    res.send(row.cert_pdf);
+    res.send(buf);
   });
 
   // Hide/unhide a lead unit row (stale MDE entries that don't map to real units)
