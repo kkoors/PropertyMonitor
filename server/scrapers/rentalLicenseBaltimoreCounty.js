@@ -21,7 +21,7 @@ async function scrapeRentalLicenseBaltimoreCounty(property) {
   const where = `B1_HSE_NBR_START=${parsed.number} AND UPPER(B1_STR_NAME) LIKE '${parsed.name.replace(/'/g, "''")}'`;
   const params = new URLSearchParams({
     where,
-    outFields: 'B1_RECORD_ID,B1_APPL_STATUS,ISSUE_DATE,EXPIRATION_DATE,B1_HSE_NBR_START,B1_STR_NAME,B1_STR_SUFFIX',
+    outFields: '*',
     f: 'json',
     resultRecordCount: '5',
   });

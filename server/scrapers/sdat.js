@@ -123,41 +123,100 @@ async function queryCityDataset(datasetId, parsed) {
 }
 
 // ── Baltimore County ────────────────────────────────────────────────────────
-// ArcGIS REST API — same domain as rental license lookup
+// Discover ArcGIS services on the county server, then query the best one for year_built.
+const BC_ARCGIS = 'https://bcgisapps.baltimorecountymd.gov/arcgis/rest/services';
+
 async function lookupBaltimoreCounty(parsed) {
-  // Try the county assessment / property info ArcGIS layers
-  const services = [
-    'https://bcgisapps.baltimorecountymd.gov/arcgis/rest/services/BCProperty/MapServer/0/query',
-    'https://bcgisapps.baltimorecountymd.gov/arcgis/rest/services/Assessment/MapServer/0/query',
-    'https://bcgisapps.baltimorecountymd.gov/arcgis/rest/services/Property/MapServer/0/query',
-  ];
+  // Step 1: check if the rental license service already has year_built
+  const rlResult = await queryBCLayer(
+    `${BC_ARCGIS}/RentalLicense/MapServer/0/query`, parsed,
+    [`B1_HSE_NBR_START=${parsed.number}`, `UPPER(B1_STR_NAME) LIKE '${parsed.nameOnly.replace(/'/g, "''").toUpperCase()}%'`]
+  );
+  if (rlResult) return rlResult;
 
-  for (const base of services) {
+  // Step 2: discover all MapServer services and try ones that sound like property/parcel data
+  let serviceNames = [];
+  try {
+    const dir = await fetch(`${BC_ARCGIS}?f=json`, { signal: AbortSignal.timeout(10000) });
+    if (dir.ok) {
+      const data = await dir.json();
+      const all = [
+        ...(data.services || []),
+        ...((data.folders || []).map(f => ({ name: f, type: 'folder' }))),
+      ];
+      console.log('[sdat-county] ArcGIS services:', all.map(s => s.name).join(', '));
+      serviceNames = all
+        .filter(s => s.type !== 'folder' && /parcel|property|assess|real.*prop|land|tax/i.test(s.name))
+        .map(s => s.name);
+      console.log('[sdat-county] candidate services:', serviceNames.join(', '));
+    }
+  } catch (err) {
+    console.log('[sdat-county] services directory error:', err.message);
+  }
+
+  // Also try folders
+  const folders = ['Parcels', 'Property', 'Assessment', 'RealProperty', 'Land'];
+  for (const folder of folders) {
     try {
-      const where = `UPPER(ST_NAME) LIKE '${parsed.nameOnly.replace(/'/g, "''").toUpperCase()}%' AND HSE_NBR=${parsed.number}`;
-      const params = new URLSearchParams({ where, outFields: '*', f: 'json', resultRecordCount: '5' });
-      const res = await fetch(`${base}?${params}`, { signal: AbortSignal.timeout(10000) });
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (data.error) { console.log(`[sdat-county] ${base} error:`, data.error.message); continue; }
+      const res = await fetch(`${BC_ARCGIS}/${folder}?f=json`, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) {
+        const data = await res.json();
+        const svcs = (data.services || []).map(s => s.name);
+        console.log(`[sdat-county] folder ${folder}:`, svcs.join(', '));
+        serviceNames.push(...svcs.filter(n => /parcel|property|assess|real.*prop|land|tax/i.test(n)));
+      }
+    } catch { /* ignore */ }
+  }
 
-      const features = data.features || [];
-      console.log(`[sdat-county] ${base}: ${features.length} features`);
-      if (features.length === 0) continue;
-
-      const f = features[0].attributes;
-      console.log('[sdat-county] fields:', Object.keys(f).join(', '));
-      const yearCol = Object.keys(f).find(k => /year.*bu|yr.*bu|yrblt/i.test(k));
-      const yearBuilt = yearCol ? Number(f[yearCol]) : null;
-      if (!yearBuilt || isNaN(yearBuilt)) continue;
-
-      return { year_built: yearBuilt, sdat_acct: f.ACCT_NO || f.PARCEL_ID || null };
-    } catch (err) {
-      console.log(`[sdat-county] ${base} error: ${err.message}`);
+  // Step 3: query each candidate service (try layers 0 and 1)
+  for (const name of [...new Set(serviceNames)]) {
+    for (const layer of [0, 1, 2]) {
+      const base = `${BC_ARCGIS}/${name}/MapServer/${layer}/query`;
+      const result = await queryBCLayer(base, parsed);
+      if (result) return result;
     }
   }
 
-  return { error: 'Baltimore County year-built lookup: no ArcGIS property layer found. Enter year built manually in Properties.' };
+  return { error: 'Baltimore County year-built: no matching ArcGIS layer found. Check pm2 logs for available services, or enter year built manually.' };
+}
+
+async function queryBCLayer(url, parsed, extraWhere) {
+  // Try multiple field name patterns for house number and street
+  const whereClauses = extraWhere || [
+    `HSE_NBR=${parsed.number}`,
+    `HOUSE_NO=${parsed.number}`,
+    `HSENUMBER=${parsed.number}`,
+    `ADDR_NO=${parsed.number}`,
+  ];
+
+  for (const where of whereClauses) {
+    try {
+      const params = new URLSearchParams({ where, outFields: '*', f: 'json', resultRecordCount: '10' });
+      const res = await fetch(`${url}?${params}`, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data.error) return null;
+
+      const features = data.features || [];
+      if (features.length === 0) continue;
+
+      const f = features[0].attributes;
+      const cols = Object.keys(f);
+      console.log(`[sdat-county] ${url} (where: ${where}): ${features.length} features, fields: ${cols.join(', ')}`);
+
+      const yearCol = cols.find(k => /year.*bu|yr.*bu|yrblt|yearblt/i.test(k));
+      const yearBuilt = yearCol ? Number(f[yearCol]) : null;
+      if (!yearBuilt || isNaN(yearBuilt) || yearBuilt < 1700 || yearBuilt > 2030) return null;
+
+      console.log(`[sdat-county] Found year_built=${yearBuilt} via ${yearCol} in ${url}`);
+      const acctCol = cols.find(k => /acct|parcel.*id|pin/i.test(k));
+      return { year_built: yearBuilt, sdat_acct: acctCol ? f[acctCol] : null };
+    } catch (err) {
+      console.log(`[sdat-county] ${url} error: ${err.message}`);
+      return null;
+    }
+  }
+  return null;
 }
 
 // ── Harford County ──────────────────────────────────────────────────────────
