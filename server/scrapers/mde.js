@@ -47,36 +47,52 @@ async function scrapeMdeRegistration(property) {
     await page.fill('#ucpublicSearch1_txtStreetName', parsed.name);
     await page.selectOption('#ucpublicSearch1_ddlCounty', countyVal);
     await page.click('#ucpublicSearch1_btnPublicSearch');
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(1500);
 
-    const bodyText = await page.innerText('body').catch(() => '');
-    const lower = bodyText.toLowerCase();
-    if (lower.includes('no records') || lower.includes('no results') || lower.includes('0 record')) {
-      return { registered: false, status: 'not_found' };
-    }
+    // Wait until either a data row (numeric tracking ID) or a no-records message appears
+    await page.waitForFunction(() => {
+      const txt = document.body.innerText.toLowerCase();
+      if (txt.includes('no records') || txt.includes('no results')) return true;
+      return [...document.querySelectorAll('table tr')].some(tr => {
+        const tds = [...tr.querySelectorAll('td')].map(td => td.innerText.trim());
+        return tds.length === 6 && /^\d+$/.test(tds[0]) && tds[4].includes('/');
+      });
+    }, { timeout: 20000 }).catch(() => {});
 
-    // Parse results: find data rows where cells[0] is a numeric tracking ID and length === 6
     const rows = await page.$$eval('table tr', trs =>
       trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
     );
 
-    const dataRow = rows.find(cells =>
+    const dataRows = rows.filter(cells =>
       cells.length === 6 && /^\d+$/.test(cells[0]) && cells[4].includes('/')
     );
+    console.log(`[mde-olrr] ${parsed.number} ${parsed.name}: ${dataRows.length} registration rows`);
 
-    if (dataRow) {
+    if (dataRows.length > 0) {
+      // Prefer Active rows, then most recent registration date
+      const parseUs = d => { const m = (d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(`${m[3]}-${m[1]}-${m[2]}`).getTime() : 0; };
+      dataRows.sort((a, b) => {
+        const aAct = a[5].toLowerCase().includes('active') ? 1 : 0;
+        const bAct = b[5].toLowerCase().includes('active') ? 1 : 0;
+        if (aAct !== bAct) return bAct - aAct;
+        return parseUs(b[4]) - parseUs(a[4]);
+      });
+      const best = dataRows[0];
       return {
         registered: true,
-        tracking_id: dataRow[0] || null,
-        owner_name: dataRow[1] || null,
-        property_address: dataRow[3] || null,
-        registration_date: dataRow[4] || null,
-        status: dataRow[5].toLowerCase().includes('active') ? 'active' : dataRow[5] || 'registered',
+        tracking_id: best[0] || null,
+        owner_name: best[1] || null,
+        property_address: best[3] || null,
+        registration_date: best[4] || null,
+        status: best[5].toLowerCase().includes('active') ? 'active' : best[5] || 'registered',
       };
     }
 
-    return { registered: true, status: 'registered' };
+    const bodyText = await page.innerText('body').catch(() => '');
+    const lower = bodyText.toLowerCase();
+    if (lower.includes('no records') || lower.includes('no results')) {
+      return { registered: false, status: 'not_found' };
+    }
+    return { error: 'MDE registry: results did not load (timeout)' };
   } catch (err) {
     return { error: err.message };
   } finally {
@@ -106,37 +122,49 @@ async function scrapeMdeCertificate(property) {
     await page.fill('#txtHomeStreetName', parsed.name);
     await page.selectOption('#ddlHomeCounty', countyVal);
     await page.click('#btnHomeSearchProperty');
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(1500);
 
-    const bodyText = await page.innerText('body').catch(() => '');
-    const lower = bodyText.toLowerCase();
-    if (lower.includes('no property records') || lower.includes('not found') || lower.includes('no records')) {
-      return { cert_found: false };
-    }
+    // Wait until either a data row (numeric cert number at col 7) or a no-records message appears
+    await page.waitForFunction(() => {
+      const txt = document.body.innerText.toLowerCase();
+      if (txt.includes('no property records') || txt.includes('no records')) return true;
+      return [...document.querySelectorAll('table tr')].some(tr => {
+        const tds = [...tr.querySelectorAll('td')].map(td => td.innerText.trim());
+        return tds.length >= 9 && /^\d+$/.test(tds[7]);
+      });
+    }, { timeout: 20000 }).catch(() => {});
 
     // Columns: Address, Unit, Owner/Manager, County, Property#, Parcel, Inspection Date, Cert#, Cert Status, ...
     const rows = await page.$$eval('table tr', trs =>
       trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
     );
 
-    const dataRow = rows.find(cells =>
+    const dataRows = rows.filter(cells =>
       cells.length >= 9 && cells[7] && /^\d+$/.test(cells[7])
     );
+    console.log(`[mde-lrca] ${parsed.number} ${parsed.name}: ${dataRows.length} certificate rows`);
 
-    if (dataRow) {
+    if (dataRows.length > 0) {
+      // Pick the most recent inspection
+      const parseUs = d => { const m = (d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(`${m[3]}-${m[1]}-${m[2]}`).getTime() : 0; };
+      dataRows.sort((a, b) => parseUs(b[6]) - parseUs(a[6]));
+      const best = dataRows[0];
       return {
         cert_found: true,
-        property_address: dataRow[0] || null,
-        owner_name: dataRow[2] || null,
-        county: dataRow[3] || null,
-        cert_number: dataRow[7] || null,
-        cert_status: dataRow[8] || null,
-        inspection_date: dataRow[6] ? dataRow[6].split(' ')[0] : null,
+        property_address: best[0] || null,
+        owner_name: best[2] || null,
+        county: best[3] || null,
+        cert_number: best[7] || null,
+        cert_status: best[8] || null,
+        inspection_date: best[6] ? best[6].split(' ')[0] : null,
       };
     }
 
-    return { cert_found: true };
+    const bodyText = await page.innerText('body').catch(() => '');
+    const lower = bodyText.toLowerCase();
+    if (lower.includes('no property records') || lower.includes('not found') || lower.includes('no records')) {
+      return { cert_found: false };
+    }
+    return { error: 'MDE certificates: results did not load (timeout)' };
   } catch (err) {
     return { error: err.message };
   } finally {

@@ -65,8 +65,16 @@ function leadStatus(property, leadRecords) {
   }
   const registered = latest.registration_status && latest.registration_status !== 'not_found';
   const certPassed = (latest.cert_status || '').toUpperCase().includes('PASS');
-  if (registered && certPassed) return { status: 'green', label: `Registered · Cert ${latest.cert_number} passed` };
-  if (registered) return { status: 'yellow', label: `Registered ${latest.registration_date || ''} · no cert`.trim() };
+  // MDE registration must be renewed every year — only current-year registrations count
+  const regYear = latest.registration_date ? new Date(latest.registration_date).getFullYear() : null;
+  const currentYear = new Date().getFullYear();
+  const regCurrent = registered && regYear === currentYear;
+
+  if (registered && !regCurrent) {
+    return { status: 'red', label: `Registration not renewed for ${currentYear} (last ${latest.registration_date || 'unknown'})` };
+  }
+  if (regCurrent && certPassed) return { status: 'green', label: `Registered ${currentYear} · Cert ${latest.cert_number} passed` };
+  if (regCurrent) return { status: 'yellow', label: `Registered ${currentYear} · no cert` };
   if (certPassed) return { status: 'yellow', label: `Cert ${latest.cert_number} passed · not registered` };
   if (latest.inspection_date) return { status: 'green', label: `Inspected ${latest.inspection_date}` };
   return { status: 'yellow', label: 'Lead record on file' };
