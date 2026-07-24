@@ -138,4 +138,57 @@ async function lookupHarford(parsed) {
   }
 }
 
-module.exports = { lookupSdat };
+// ── Statewide: SDAT owner mailing address via MD iMAP parcel layer ──────────
+const MD_PARCELS = 'https://mdgeodata.md.gov/imap/rest/services/PlanningCadastre/MD_PropertyData/MapServer/0/query';
+const JURSCODES = {
+  baltimore_city:   'BACI',
+  baltimore_county: 'BACO',
+  harford:          'HARF',
+};
+
+async function lookupSdatMailing(property) {
+  const jurs = JURSCODES[property.municipality];
+  if (!jurs) return { error: `No jurisdiction code for: ${property.municipality}` };
+
+  const parsed = parseAddress(property.address);
+  if (!parsed) return { error: `Could not parse address: ${property.address}` };
+
+  const streetName = parsed.nameOnly.replace(/'/g, "''").toUpperCase();
+  const where = `JURSCODE='${jurs}' AND PREMSNUM='${parsed.number}' AND UPPER(PREMSNAM) LIKE '${streetName}%'`;
+  const params = new URLSearchParams({
+    where,
+    outFields: 'ACCTID,OWNADD1,OWNADD2,OWNCITY,OWNSTATE,OWNERZIP,ADDRESS,PREMSNAM',
+    f: 'json',
+    resultRecordCount: '5',
+  });
+
+  try {
+    const res = await fetch(`${MD_PARCELS}?${params}`, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) return { error: `MD parcel service HTTP ${res.status}` };
+    const data = await res.json();
+    if (data.error) return { error: `MD parcel service: ${data.error.message}` };
+
+    const features = data.features || [];
+    console.log(`[sdat-mailing] ${features.length} parcels for ${jurs} ${parsed.number} ${streetName}%`);
+    if (features.length === 0) {
+      return { error: 'SDAT mailing lookup: address not found in MD parcel data.' };
+    }
+
+    const f = features[0].attributes;
+    const mailing = [
+      [f.OWNADD1, f.OWNADD2].filter(Boolean).join(' ').trim(),
+      [f.OWNCITY, f.OWNSTATE].filter(Boolean).join(', '),
+      f.OWNERZIP || '',
+    ].filter(Boolean).join(', ').replace(/\s+/g, ' ').trim();
+
+    return {
+      tax_id: f.ACCTID || null,
+      mailing_address: mailing || null,
+      parcel_address: f.ADDRESS || null,
+    };
+  } catch (err) {
+    return { error: `SDAT mailing lookup error: ${err.message}` };
+  }
+}
+
+module.exports = { lookupSdat, lookupSdatMailing };

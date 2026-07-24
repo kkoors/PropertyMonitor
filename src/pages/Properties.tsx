@@ -8,7 +8,7 @@ const MUNICIPALITIES = [
   { value: 'harford', label: 'Harford County' },
 ]
 
-const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '', owner_name: '', owner_address: '', commercial: false, multifamily: false, lead_not_monitored: false, license_not_monitored: false }
+const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '', owner_name: '', owner_address: '', commercial: false, multifamily: false, lead_not_monitored: false, license_not_monitored: false, tax_id: '', water_mailing_address: '' }
 
 interface Props {
   editPropertyId?: number | null
@@ -28,7 +28,7 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
   const [filterMuni, setFilterMuni] = useLocalState('props.filterMuni', '')
   const [showPrivate, setShowPrivate] = useLocalState('props.showPrivate', false)
   const [search, setSearch] = useLocalState('props.search', '')
-  const [sortCol, setSortCol] = useLocalState<'name' | 'municipality' | 'account_number' | 'bill_count' | 'latest_bill_date' | 'latest_amount' | 'last_pay_date' | 'last_pay_amount' | 'private_ws'>('props.sortCol', 'name')
+  const [sortCol, setSortCol] = useLocalState<'name' | 'municipality' | 'account_number' | 'owner_name' | 'tax_id' | 'year_built' | 'private_ws'>('props.sortCol.v2', 'name')
   const [sortDir, setSortDir] = useLocalState<'asc' | 'desc'>('props.sortDir', 'asc')
 
   useEffect(() => { load() }, [])
@@ -57,6 +57,8 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
       multifamily: form.multifamily ? 1 : 0,
       lead_not_monitored: form.lead_not_monitored ? 1 : 0,
       license_not_monitored: form.license_not_monitored ? 1 : 0,
+      tax_id: form.tax_id || null,
+      water_mailing_address: form.water_mailing_address || null,
       owner_name: form.owner_name || null,
       owner_address: form.owner_address || null,
       lead_free_cert_date: form.lead_free_cert_date || null,
@@ -69,7 +71,7 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
   }
 
   function startEdit(p: any) {
-    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '', owner_name: p.owner_name || '', owner_address: p.owner_address || '', commercial: !!p.commercial, multifamily: !!p.multifamily, lead_not_monitored: !!p.lead_not_monitored, license_not_monitored: !!p.license_not_monitored })
+    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '', owner_name: p.owner_name || '', owner_address: p.owner_address || '', commercial: !!p.commercial, multifamily: !!p.multifamily, lead_not_monitored: !!p.lead_not_monitored, license_not_monitored: !!p.license_not_monitored, tax_id: p.tax_id || '', water_mailing_address: p.water_mailing_address || '' })
     setEditId(p.id)
     setShowForm(true)
   }
@@ -118,7 +120,7 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
 
   const mLabel = (m: string) => MUNICIPALITIES.find(x => x.value === m)?.label || m
 
-  const NUMERIC_COLS = new Set(['bill_count', 'latest_amount', 'last_pay_amount', 'private_ws'])
+  const NUMERIC_COLS = new Set(['year_built', 'private_ws'])
 
   const q = search.toLowerCase()
   const displayed = properties
@@ -174,8 +176,16 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
               <input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="123 Main St" />
             </div>
             <div className="form-group">
-              <label>Account Number</label>
-              <input value={form.account_number} onChange={e => setForm(f => ({ ...f, account_number: e.target.value }))} placeholder="Optional but recommended" />
+              <label>Water Account Number</label>
+              <input value={form.account_number} onChange={e => setForm(f => ({ ...f, account_number: e.target.value }))} placeholder="Water/sewer billing account" />
+            </div>
+            <div className="form-group">
+              <label>Tax ID (SDAT Account)</label>
+              <input value={form.tax_id} onChange={e => setForm(f => ({ ...f, tax_id: e.target.value }))} placeholder="Auto-filled by Tax Address check" />
+            </div>
+            <div className="form-group full-col">
+              <label>Water Bill Mailing Address</label>
+              <input value={form.water_mailing_address} onChange={e => setForm(f => ({ ...f, water_mailing_address: e.target.value }))} placeholder="Where the water bill is mailed" />
             </div>
             <div className="form-group">
               <label>Notes</label>
@@ -263,12 +273,10 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
                 <Th col="name">Name</Th>
                 <th>Address</th>
                 <Th col="municipality">Municipality</Th>
-                <Th col="account_number">Account #</Th>
-                <Th col="bill_count">Bills</Th>
-                <Th col="latest_bill_date">Latest Bill Date</Th>
-                <Th col="latest_amount">Latest Amount</Th>
-                <Th col="last_pay_date">Last Pay Date</Th>
-                <Th col="last_pay_amount">Last Pay Amt</Th>
+                <Th col="account_number">Water Acct #</Th>
+                <Th col="owner_name">Owner</Th>
+                <Th col="tax_id">Tax ID</Th>
+                <Th col="year_built">Year Built</Th>
                 {showPrivate && <Th col="private_ws">Private W/S</Th>}
                 <th>Actions</th>
               </tr>
@@ -280,11 +288,9 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
                   <td style={{ color: '#6b7280' }}>{p.address}</td>
                   <td style={{ whiteSpace: 'nowrap' }}><span className={`badge badge-${p.municipality.replace('baltimore_', '')}`}>{mLabel(p.municipality)}</span></td>
                   <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{p.account_number || <span style={{ color: '#9ca3af' }}>—</span>}</td>
-                  <td>{p.bill_count} {p.new_bill_count > 0 && <span className="badge badge-new">{p.new_bill_count} new</span>}</td>
-                  <td>{p.latest_bill_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
-                  <td>{p.latest_amount != null ? <strong>${Number(p.latest_amount).toFixed(2)}</strong> : <span style={{color:'#9ca3af'}}>—</span>}</td>
-                  <td>{p.last_pay_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
-                  <td style={{color:'#059669'}}>{p.last_pay_amount != null ? `$${Math.abs(Number(p.last_pay_amount)).toFixed(2)}` : <span style={{color:'#9ca3af'}}>—</span>}</td>
+                  <td>{p.owner_name || <span style={{color:'#9ca3af'}}>—</span>}</td>
+                  <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{p.tax_id || <span style={{color:'#9ca3af'}}>—</span>}</td>
+                  <td>{p.year_built || <span style={{color:'#9ca3af'}}>—</span>}</td>
                   {showPrivate && <td style={{ textAlign: 'center' }}>{p.private_ws ? '✓' : ''}</td>}
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <button className="btn btn-primary btn-sm" onClick={() => checkNow(p.id)} disabled={checking === p.id || !!p.private_ws} title={p.private_ws ? 'Private W/S — monitoring disabled' : 'Check for a new bill now'} style={{marginRight:4}}>

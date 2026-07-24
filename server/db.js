@@ -166,6 +166,10 @@ function initSchema(db) {
   if (!ownerCols.includes('multifamily')) db.prepare(`ALTER TABLE properties ADD COLUMN multifamily INTEGER NOT NULL DEFAULT 0`).run();
   if (!ownerCols.includes('lead_not_monitored')) db.prepare(`ALTER TABLE properties ADD COLUMN lead_not_monitored INTEGER NOT NULL DEFAULT 0`).run();
   if (!ownerCols.includes('license_not_monitored')) db.prepare(`ALTER TABLE properties ADD COLUMN license_not_monitored INTEGER NOT NULL DEFAULT 0`).run();
+  if (!ownerCols.includes('tax_id')) db.prepare(`ALTER TABLE properties ADD COLUMN tax_id TEXT`).run();
+  if (!ownerCols.includes('water_mailing_address')) db.prepare(`ALTER TABLE properties ADD COLUMN water_mailing_address TEXT`).run();
+  if (!ownerCols.includes('sdat_mailing_address')) db.prepare(`ALTER TABLE properties ADD COLUMN sdat_mailing_address TEXT`).run();
+  if (!ownerCols.includes('sdat_checked_at')) db.prepare(`ALTER TABLE properties ADD COLUMN sdat_checked_at TEXT`).run();
   if (!leadCols.includes('unit')) db.prepare(`ALTER TABLE lead_records ADD COLUMN unit TEXT`).run();
 
   // Migrations for existing databases

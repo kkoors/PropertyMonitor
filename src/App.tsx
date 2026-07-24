@@ -6,12 +6,15 @@ import Bills from './pages/Bills'
 import ScrapeHistory from './pages/ScrapeHistory'
 import AddressLookup from './pages/AddressLookup'
 import Compliance from './pages/Compliance'
+import Licensing from './pages/Licensing'
+import LeadRegistry from './pages/LeadRegistry'
+import TaxAddress from './pages/TaxAddress'
 import './app.css'
 
-type Page = 'compliance' | 'properties' | 'lookup' | 'bills' | 'dashboard' | 'scrapes'
+type Page = 'compliance' | 'licensing' | 'lead' | 'taxaddress' | 'properties' | 'lookup' | 'bills' | 'dashboard' | 'scrapes'
 
 export default function App() {
-  const [page, setPage] = useLocalState<Page>('app.page', 'compliance')
+  const [page, setPage] = useLocalState<Page>('app.page.v2', 'compliance')
   const [editPropertyId, setEditPropertyId] = useState<number | null>(null)
 
   function goEditProperty(id: number) {
@@ -36,6 +39,9 @@ export default function App() {
         <div className="nav-links">
           <div className="nav-section">Compliance</div>
           {nav('compliance', 'Compliance')}
+          {nav('licensing', 'Licensing')}
+          {nav('lead', 'Lead Registry')}
+          {nav('taxaddress', 'Tax Address')}
           {nav('properties', 'Properties')}
           {nav('lookup', 'Address Lookup')}
           <div className="nav-section">Water</div>
@@ -49,6 +55,9 @@ export default function App() {
       </nav>
       <main className="main">
         {page === 'compliance'  && <Compliance onEditProperty={goEditProperty} />}
+        {page === 'licensing'   && <Licensing />}
+        {page === 'lead'        && <LeadRegistry />}
+        {page === 'taxaddress'  && <TaxAddress />}
         {page === 'properties'  && <Properties editPropertyId={editPropertyId} onClearEditId={clearEditProperty} />}
         {page === 'lookup'      && <AddressLookup onAddProperties={() => setPage('properties')} />}
         {page === 'dashboard'   && <Dashboard onNavigate={p => setPage(p as Page)} />}

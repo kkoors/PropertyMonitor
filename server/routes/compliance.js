@@ -1,6 +1,6 @@
 'use strict';
 const { Router } = require('express');
-const { lookupSdat } = require('../scrapers/sdat');
+const { lookupSdat, lookupSdatMailing } = require('../scrapers/sdat');
 const { scrapeRentalLicenseBaltimoreCounty } = require('../scrapers/rentalLicenseBaltimoreCounty');
 const { scrapeRentalLicenseBaltimoreCity } = require('../scrapers/rentalLicenseBaltimoreCity');
 const { scrapeMdeRegistration, scrapeMdeCertificate } = require('../scrapers/mde');
@@ -312,6 +312,94 @@ module.exports = function makeComplianceRouter(db) {
     }
 
     res.json({ registration: reg, certificate: cert, saved: registered || certFound });
+  });
+
+  // ── Licensing dashboard ───────────────────────────────────────────────────
+  router.get('/licenses', (req, res) => {
+    const rows = db.prepare(`
+      SELECT p.id, p.name, p.address, p.municipality, p.commercial, p.license_not_monitored,
+             l.license_number, l.status, l.issue_date, l.exp_date, l.scraped_at,
+             (l.confirmation_letter IS NOT NULL) as has_letter
+      FROM properties p
+      LEFT JOIN rental_licenses l ON l.property_id = p.id AND l.municipality = p.municipality AND l.license_type = 'rental_license'
+      WHERE p.active = 1
+      ORDER BY p.name
+    `).all();
+    res.json(rows);
+  });
+
+  // ── Lead Registry dashboard ───────────────────────────────────────────────
+  router.get('/lead-registry', (req, res) => {
+    const props = db.prepare(`SELECT * FROM properties WHERE active = 1 ORDER BY name`).all();
+    const out = props.map(p => {
+      const rec = db.prepare(`SELECT * FROM lead_records WHERE property_id = ? AND source = 'mde'`).get(p.id);
+      const units = db.prepare(`SELECT unit, cert_number, cert_status, inspection_date FROM lead_records WHERE property_id = ? AND source = 'mde-unit' ORDER BY unit`).all(p.id);
+      return {
+        id: p.id, name: p.name, address: p.address, municipality: p.municipality,
+        year_built: p.year_built, commercial: p.commercial, lead_not_monitored: p.lead_not_monitored,
+        multifamily: p.multifamily, owner_name: p.owner_name, owner_address: p.owner_address,
+        tracking_id: rec?.tracking_id || null,
+        registry_owner: rec?.owner_name || null,
+        registry_owner_address: rec?.owner_address || null,
+        registration_date: rec?.registration_date || null,
+        bank_date: rec?.bank_date || null,
+        payment_year: rec?.payment_year || null,
+        cert_number: rec?.cert_number || null,
+        cert_status: rec?.cert_status || null,
+        inspection_date: rec?.inspection_date || null,
+        owner_name_match: looseMatch(p.owner_name, rec?.owner_name),
+        owner_address_match: looseMatch(p.owner_address, rec?.owner_address),
+        units,
+      };
+    });
+    res.json(out);
+  });
+
+  // ── Tax mailing address (SDAT) dashboard ─────────────────────────────────
+  function taxAddressFlag(p) {
+    if (!p.sdat_mailing_address) return { status: 'unknown', label: 'Not checked' };
+    // Mailing address pointing at the property itself → tax bills go to the rental
+    const propStreet = (p.address || '').split(',')[0];
+    if (looseMatch(propStreet, p.sdat_mailing_address)) {
+      return { status: 'red', label: 'Mails to property address' };
+    }
+    const ownerOk = looseMatch(p.owner_address, p.sdat_mailing_address);
+    if (ownerOk === true) return { status: 'green', label: 'Matches owner address' };
+    if (ownerOk === null) return { status: 'yellow', label: 'No owner address on file to compare' };
+    return { status: 'red', label: 'Does not match owner address' };
+  }
+
+  router.get('/tax-address', (req, res) => {
+    const props = db.prepare(`SELECT id, name, address, municipality, owner_name, owner_address, tax_id, sdat_mailing_address, sdat_checked_at FROM properties WHERE active = 1 ORDER BY name`).all();
+    res.json(props.map(p => ({ ...p, flag: taxAddressFlag(p) })));
+  });
+
+  router.post('/tax-address/:propertyId', async (req, res) => {
+    const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);
+    if (!property) return res.status(404).json({ error: 'Not found' });
+
+    const result = await lookupSdatMailing(property);
+    if (result.error) return res.status(422).json({ error: result.error });
+
+    db.prepare(`UPDATE properties SET sdat_mailing_address = ?, sdat_checked_at = datetime('now'), tax_id = COALESCE(NULLIF(tax_id, ''), ?) WHERE id = ?`)
+      .run(result.mailing_address, result.tax_id, property.id);
+
+    const updated = db.prepare(`SELECT id, name, address, municipality, owner_name, owner_address, tax_id, sdat_mailing_address, sdat_checked_at FROM properties WHERE id = ?`).get(property.id);
+    res.json({ ...updated, flag: taxAddressFlag(updated) });
+  });
+
+  router.post('/tax-address-all', async (req, res) => {
+    const props = db.prepare(`SELECT * FROM properties WHERE active = 1`).all();
+    const results = [];
+    for (const property of props) {
+      const result = await lookupSdatMailing(property);
+      if (!result.error) {
+        db.prepare(`UPDATE properties SET sdat_mailing_address = ?, sdat_checked_at = datetime('now'), tax_id = COALESCE(NULLIF(tax_id, ''), ?) WHERE id = ?`)
+          .run(result.mailing_address, result.tax_id, property.id);
+      }
+      results.push({ id: property.id, name: property.name, ...result });
+    }
+    res.json({ checked: results.length, results });
   });
 
   return router;
