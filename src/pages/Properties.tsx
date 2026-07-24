@@ -13,9 +13,10 @@ const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_n
 interface Props {
   editPropertyId?: number | null
   onClearEditId?: () => void
+  onDoneEditing?: () => void
 }
 
-export default function Properties({ editPropertyId, onClearEditId }: Props) {
+export default function Properties({ editPropertyId, onClearEditId, onDoneEditing }: Props) {
   const [properties, setProperties] = useState<any[]>([])
   const [form, setForm] = useState({ ...BLANK })
   const [editId, setEditId] = useState<number | null>(null)
@@ -68,6 +69,7 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
     setEditId(null)
     setForm({ ...BLANK })
     load()
+    onDoneEditing?.()
   }
 
   function startEdit(p: any) {
@@ -258,7 +260,7 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
           </div>
           <div className="form-actions">
             <button className="btn btn-primary" onClick={save}>Save</button>
-            <button className="btn btn-ghost" onClick={() => setShowForm(false)}>Cancel</button>
+            <button className="btn btn-ghost" onClick={() => { setShowForm(false); onDoneEditing?.() }}>Cancel</button>
           </div>
         </div>
       )}

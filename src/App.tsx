@@ -14,12 +14,31 @@ import './app.css'
 
 type Page = 'compliance' | 'licensing' | 'lead' | 'taxaddress' | 'properties' | 'lookup' | 'bills' | 'dashboard' | 'scrapes' | 'admin'
 
+const PAGES: Page[] = ['compliance', 'licensing', 'lead', 'taxaddress', 'properties', 'lookup', 'bills', 'dashboard', 'scrapes', 'admin']
+
 const DEFAULT_NAME = 'KRS Property Compliance Monitor'
 
+function pageFromUrl(): Page {
+  const p = window.location.pathname.replace(/^\//, '')
+  return (PAGES as string[]).includes(p) ? (p as Page) : 'compliance'
+}
+
 export default function App() {
-  const [page, setPage] = useLocalState<Page>('app.page.v2', 'compliance')
+  const [page, setPageState] = useState<Page>(pageFromUrl)
+  const [returnPage, setReturnPage] = useState<Page | null>(null)
   const [editPropertyId, setEditPropertyId] = useState<number | null>(null)
   const [settings, setSettings] = useState<Record<string, string>>({})
+
+  function setPage(p: Page) {
+    if (p !== page) window.history.pushState(null, '', `/${p}`)
+    setPageState(p)
+  }
+
+  useEffect(() => {
+    const onPop = () => setPageState(pageFromUrl())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
   async function loadSettings() {
     try {
@@ -41,12 +60,22 @@ export default function App() {
   useEffect(() => { loadSettings() }, [])
 
   function goEditProperty(id: number) {
+    setReturnPage(page !== 'properties' ? page : null)
     setEditPropertyId(id)
     setPage('properties')
   }
 
   function clearEditProperty() {
     setEditPropertyId(null)
+  }
+
+  // After saving/canceling an edit that came from another page, go back there
+  function doneEditing() {
+    setEditPropertyId(null)
+    if (returnPage) {
+      setPage(returnPage)
+      setReturnPage(null)
+    }
   }
 
   const nav = (p: Page, label: string) => (
@@ -88,7 +117,7 @@ export default function App() {
         {page === 'licensing'   && <Licensing onEditProperty={goEditProperty} />}
         {page === 'lead'        && <LeadRegistry onEditProperty={goEditProperty} />}
         {page === 'taxaddress'  && <TaxAddress onEditProperty={goEditProperty} />}
-        {page === 'properties'  && <Properties editPropertyId={editPropertyId} onClearEditId={clearEditProperty} />}
+        {page === 'properties'  && <Properties editPropertyId={editPropertyId} onClearEditId={clearEditProperty} onDoneEditing={doneEditing} />}
         {page === 'lookup'      && <AddressLookup onAddProperties={() => setPage('properties')} />}
         {page === 'dashboard'   && <Dashboard onNavigate={p => setPage(p as Page)} />}
         {page === 'bills'       && <Bills />}
