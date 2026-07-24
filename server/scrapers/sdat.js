@@ -1,5 +1,8 @@
 'use strict';
 
+// SDAT website is Cloudflare-protected and blocks headless browsers.
+// We use municipality-specific open data APIs instead.
+
 const COUNTY_CODES = {
   baltimore_city:   '03',
   baltimore_county: '02',
@@ -17,152 +20,163 @@ function parseAddress(address) {
 
 async function lookupSdat(property) {
   const countyCode = COUNTY_CODES[property.municipality];
-  if (!countyCode) return { error: `No SDAT county code for municipality: ${property.municipality}` };
+  if (!countyCode) return { error: `No county code for: ${property.municipality}` };
 
   const parsed = parseAddress(property.address);
   if (!parsed) return { error: `Could not parse address: ${property.address}` };
 
-  return await scrapeSdatPlaywright(countyCode, parsed);
+  // Route to the right open-data API by municipality
+  if (property.municipality === 'baltimore_city') {
+    return lookupBaltimoreCity(parsed);
+  } else if (property.municipality === 'baltimore_county') {
+    return lookupBaltimoreCounty(parsed);
+  } else if (property.municipality === 'harford') {
+    return lookupHarford(parsed, countyCode);
+  }
+  return { error: `No year-built lookup implemented for: ${property.municipality}` };
 }
 
-async function scrapeSdatPlaywright(countyCode, parsed) {
-  const { chromium } = require('playwright');
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+// ── Baltimore City ──────────────────────────────────────────────────────────
+// Open Baltimore has a Real Property dataset with year_build field
+async function lookupBaltimoreCity(parsed) {
+  // Discover the right dataset via Socrata catalog
   try {
-    const page = await browser.newPage();
-    page.setDefaultTimeout(60000);
+    const catalogRes = await fetch(
+      `https://data.baltimorecity.gov/api/catalog/v1?q=real+property&limit=10`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (catalogRes.ok) {
+      const catalog = await catalogRes.json();
+      const datasets = catalog.results || [];
+      console.log('[sdat-city] catalog datasets:', datasets.map(d => `${d.resource?.id} — ${d.resource?.name}`).join('\n  '));
 
-    await page.goto('https://sdat.dat.maryland.gov/RealProperty/Pages/default.aspx', {
-      waitUntil: 'networkidle',
-      timeout: 60000,
-    });
+      for (const ds of datasets) {
+        const id = ds.resource?.id;
+        if (!id) continue;
+        const name = (ds.resource?.name || '').toLowerCase();
+        if (!name.includes('real property') && !name.includes('assessment') && !name.includes('tax')) continue;
 
-    const title = await page.title();
-    console.log(`[sdat] Page title: "${title}"`);
-
-    // Wait for ANY select to appear in the DOM (covers lazy-rendered dropdowns)
-    await page.waitForSelector('select', { timeout: 30000 }).catch(async () => {
-      // Last resort: dump page content for diagnosis
-      const html = await page.content().catch(() => '');
-      console.log('[sdat] No select found. Page HTML snippet:', html.slice(0, 1000));
-    });
-
-    const selectCount = await page.locator('select').count();
-    console.log(`[sdat] select count: ${selectCount}`);
-    if (selectCount === 0) return { error: 'SDAT: no select elements on page — site may have changed structure' };
-
-    // Log all select IDs and option counts
-    for (let i = 0; i < selectCount; i++) {
-      const sel = page.locator('select').nth(i);
-      const id  = await sel.getAttribute('id').catch(() => '');
-      const opts = await sel.locator('option').allTextContents().catch(() => []);
-      console.log(`[sdat] select[${i}] id="${id}" opts=${opts.length}: ${opts.slice(0, 4).join(' | ')}`);
-    }
-
-    // Find the county dropdown — it should have the most options
-    let countyIdx = 0;
-    let maxOpts = 0;
-    for (let i = 0; i < selectCount; i++) {
-      const n = await page.locator('select').nth(i).locator('option').count();
-      if (n > maxOpts) { maxOpts = n; countyIdx = i; }
-    }
-    const countySelect = page.locator('select').nth(countyIdx);
-    console.log(`[sdat] Using select[${countyIdx}] as county dropdown (${maxOpts} options)`);
-
-    // Try selecting by value, then by partial text
-    await countySelect.selectOption({ value: countyCode }).catch(async () => {
-      const opts = await countySelect.locator('option').all();
-      for (const opt of opts) {
-        const text = (await opt.textContent() || '').toUpperCase();
-        const val  = await opt.getAttribute('value') || '';
-        if (text.includes('BALTIMORE CITY') && countyCode === '03') {
-          await countySelect.selectOption({ value: val }); return;
-        }
-        if (text.includes('BALTIMORE CO') && countyCode === '02') {
-          await countySelect.selectOption({ value: val }); return;
-        }
-        if (text.includes('HARFORD') && countyCode === '13') {
-          await countySelect.selectOption({ value: val }); return;
-        }
+        const result = await queryCityDataset(id, parsed);
+        if (result && !result.error) return result;
       }
-      console.log('[sdat] Could not match county in dropdown');
-    });
-
-    // WebForms postback after county selection
-    await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(1500);
-
-    // Log visible text inputs
-    const inputs = await page.locator('input[type="text"]:visible').all();
-    console.log(`[sdat] visible text inputs after county select: ${inputs.length}`);
-    for (let i = 0; i < inputs.length; i++) {
-      const id = await inputs[i].getAttribute('id').catch(() => '');
-      const ph = await inputs[i].getAttribute('placeholder').catch(() => '');
-      console.log(`[sdat] input[${i}] id="${id}" placeholder="${ph}"`);
     }
-
-    // Fill street number — try specific selectors first, then by position
-    const numInput = await page.locator([
-      'input[id*="StreetNumber" i]',
-      'input[name*="StreetNumber" i]',
-      'input[placeholder*="Street Number" i]',
-      'input[placeholder*="House" i]',
-    ].join(', ')).first().isVisible().then(v => v
-      ? page.locator(['input[id*="StreetNumber" i]','input[name*="StreetNumber" i]','input[placeholder*="Street Number" i]','input[placeholder*="House" i]'].join(', ')).first()
-      : inputs[0]
-    ).catch(() => inputs[0]);
-
-    const nameInput = await page.locator([
-      'input[id*="StreetName" i]',
-      'input[name*="StreetName" i]',
-      'input[placeholder*="Street Name" i]',
-    ].join(', ')).first().isVisible().then(v => v
-      ? page.locator(['input[id*="StreetName" i]','input[name*="StreetName" i]','input[placeholder*="Street Name" i]'].join(', ')).first()
-      : inputs[1]
-    ).catch(() => inputs[1]);
-
-    if (!numInput || !nameInput) return { error: 'SDAT: could not locate address input fields after county selection' };
-
-    await numInput.fill(parsed.number);
-    await nameInput.fill(parsed.nameOnly);
-    console.log(`[sdat] Filled: number="${parsed.number}" name="${parsed.nameOnly}"`);
-
-    const searchBtn = page.locator('input[type="submit"], button[type="submit"]').first();
-    await searchBtn.click();
-
-    await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-    await page.waitForTimeout(2000);
-
-    // Find first link in results (should be account number or address link)
-    const links = await page.locator('table a').all();
-    console.log(`[sdat] Result links: ${links.length}`);
-    if (links.length === 0) {
-      const body = await page.innerText('body').catch(() => '');
-      console.log('[sdat] No result links. Body:', body.slice(0, 400));
-      return { error: 'SDAT: no results — address not found in county database' };
-    }
-
-    await links[0].click();
-    await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-    await page.waitForTimeout(1000);
-
-    const body = await page.innerText('body');
-    const ybMatch = body.match(/year\s*built[:\s]+(\d{4})/i);
-    const yearBuilt = ybMatch ? Number(ybMatch[1]) : null;
-    const acctMatch = body.match(/account\s*(?:number|#|no\.?)[:\s]+([A-Z0-9\-\s]{4,30}?)(?:\n|\r|$)/i);
-    const sdatAcct = acctMatch ? acctMatch[1].trim() : null;
-
-    if (!yearBuilt) {
-      console.log('[sdat] Detail page body:', body.slice(0, 600));
-      return { error: 'SDAT: property detail found but year built not on page' };
-    }
-
-    return { year_built: yearBuilt, sdat_acct: sdatAcct };
   } catch (err) {
-    return { error: `SDAT scrape failed: ${err.message}` };
-  } finally {
-    await browser.close();
+    console.log('[sdat-city] catalog error:', err.message);
   }
+
+  // Fallback: try known dataset IDs for Baltimore City real property
+  const knownIds = ['27w9-urtv', 'yi87-8hs7', 'mgsc-e6h8', '7j8r-9fde', 'dz54-2aru'];
+  for (const id of knownIds) {
+    const result = await queryCityDataset(id, parsed);
+    if (result && !result.error) return result;
+  }
+
+  return { error: 'Baltimore City year-built lookup: no matching dataset found. Enter year built manually in Properties.' };
+}
+
+async function queryCityDataset(datasetId, parsed) {
+  const url = `https://data.baltimorecity.gov/resource/${datasetId}.json`;
+  try {
+    // Probe: get one record to see column names
+    const probe = await fetch(`${url}?$limit=1`, { signal: AbortSignal.timeout(8000) });
+    if (!probe.ok) return null;
+    const sample = await probe.json();
+    if (!Array.isArray(sample) || sample.length === 0) return null;
+
+    const cols = Object.keys(sample[0]);
+    console.log(`[sdat-city] dataset ${datasetId} cols:`, cols.join(', '));
+
+    // Find house number and street name columns
+    const numCol  = cols.find(c => /house|bldg|premise|street.*no|^no$/i.test(c));
+    const nameCol = cols.find(c => /street.*name|st_name|streetname/i.test(c));
+    const yearCol = cols.find(c => /year.*bu|yr.*bu|yrblt|yearblt/i.test(c));
+
+    if (!numCol || !nameCol || !yearCol) {
+      console.log(`[sdat-city] dataset ${datasetId}: missing required cols (num=${numCol} name=${nameCol} year=${yearCol})`);
+      return null;
+    }
+
+    const q = new URLSearchParams({
+      $where: `${numCol}='${parsed.number}'`,
+      $limit: '20',
+    });
+    const res = await fetch(`${url}?${q}`, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    console.log(`[sdat-city] dataset ${datasetId}: ${rows.length} rows for house# ${parsed.number}`);
+    if (rows.length === 0) return null;
+
+    // Match street name
+    const row = rows.find(r => {
+      const sn = (r[nameCol] || '').toUpperCase();
+      return sn.includes(parsed.nameOnly.toUpperCase()) || parsed.nameOnly.toUpperCase().includes(sn);
+    }) || rows[0];
+
+    const yearBuilt = row[yearCol] ? Number(row[yearCol]) : null;
+    if (!yearBuilt || isNaN(yearBuilt)) return null;
+
+    return { year_built: yearBuilt, sdat_acct: row.acctno || row.account_no || row.parcel_id || null };
+  } catch (err) {
+    console.log(`[sdat-city] dataset ${datasetId} error: ${err.message}`);
+    return null;
+  }
+}
+
+// ── Baltimore County ────────────────────────────────────────────────────────
+// ArcGIS REST API — same domain as rental license lookup
+async function lookupBaltimoreCounty(parsed) {
+  // Try the county assessment / property info ArcGIS layers
+  const services = [
+    'https://bcgisapps.baltimorecountymd.gov/arcgis/rest/services/BCProperty/MapServer/0/query',
+    'https://bcgisapps.baltimorecountymd.gov/arcgis/rest/services/Assessment/MapServer/0/query',
+    'https://bcgisapps.baltimorecountymd.gov/arcgis/rest/services/Property/MapServer/0/query',
+  ];
+
+  for (const base of services) {
+    try {
+      const where = `UPPER(ST_NAME) LIKE '${parsed.nameOnly.replace(/'/g, "''").toUpperCase()}%' AND HSE_NBR=${parsed.number}`;
+      const params = new URLSearchParams({ where, outFields: '*', f: 'json', resultRecordCount: '5' });
+      const res = await fetch(`${base}?${params}`, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.error) { console.log(`[sdat-county] ${base} error:`, data.error.message); continue; }
+
+      const features = data.features || [];
+      console.log(`[sdat-county] ${base}: ${features.length} features`);
+      if (features.length === 0) continue;
+
+      const f = features[0].attributes;
+      console.log('[sdat-county] fields:', Object.keys(f).join(', '));
+      const yearCol = Object.keys(f).find(k => /year.*bu|yr.*bu|yrblt/i.test(k));
+      const yearBuilt = yearCol ? Number(f[yearCol]) : null;
+      if (!yearBuilt || isNaN(yearBuilt)) continue;
+
+      return { year_built: yearBuilt, sdat_acct: f.ACCT_NO || f.PARCEL_ID || null };
+    } catch (err) {
+      console.log(`[sdat-county] ${base} error: ${err.message}`);
+    }
+  }
+
+  return { error: 'Baltimore County year-built lookup: no ArcGIS property layer found. Enter year built manually in Properties.' };
+}
+
+// ── Harford County ──────────────────────────────────────────────────────────
+async function lookupHarford(parsed, countyCode) {
+  // Try Maryland Open Data for Harford assessment records
+  try {
+    const catalog = await fetch(
+      `https://data.maryland.gov/api/catalog/v1?q=harford+real+property&limit=5`,
+      { signal: AbortSignal.timeout(10000) }
+    );
+    if (catalog.ok) {
+      const cat = await catalog.json();
+      console.log('[sdat-harford] MD catalog:', (cat.results || []).map(d => `${d.resource?.id} — ${d.resource?.name}`).join('\n  '));
+    }
+  } catch (err) {
+    console.log('[sdat-harford] catalog error:', err.message);
+  }
+
+  return { error: 'Harford County year-built lookup not yet available. Enter year built manually in Properties.' };
 }
 
 module.exports = { lookupSdat };

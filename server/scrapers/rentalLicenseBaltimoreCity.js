@@ -1,9 +1,5 @@
 'use strict';
 
-// Baltimore City rental registration lookup.
-// The Open Baltimore Socrata dataset ID for rental registrations is not publicly confirmed —
-// this scraper tries the API and falls back to Playwright against the DHCD property search.
-
 function parseAddress(address) {
   const street = address.split(',')[0].trim();
   const match = street.match(/^(\d+)\s+(.+)$/);
@@ -13,78 +9,94 @@ function parseAddress(address) {
   const last = parts[parts.length - 1].toUpperCase();
   const hasSuffix = suffixes.has(last);
   const name = hasSuffix ? parts.slice(0, -1).join(' ') : parts.join(' ');
-  const suffix = hasSuffix ? last : '';
-  return { number: match[1], name: name.toUpperCase(), suffix, full: match[2].toUpperCase() };
+  return { number: match[1], name: name.toUpperCase(), full: match[2].toUpperCase() };
 }
 
-// Known candidate dataset IDs on data.baltimorecity.gov for rental registrations
-const SODA_CANDIDATES = [
-  { id: 'ybmg-3rqy', numField: 'house_no',     nameField: 'street_name' },
-  { id: 'feu4-bfkc', numField: 'blocknumber',   nameField: 'streetname'  },
-  { id: '5cxy-crxi', numField: 'house_number',  nameField: 'street_name' },
-  { id: 'w4th-47vz', numField: 'premise_no',    nameField: 'st_name'     },
-];
-
-async function trySODA(parsed) {
-  for (const ds of SODA_CANDIDATES) {
+// Use Open Baltimore Socrata catalog to discover the rental registration dataset
+async function discoverDataset(parsed) {
+  const searches = ['rental registration', 'rental license', 'dhcd registration'];
+  for (const q of searches) {
     try {
-      const url = `https://data.baltimorecity.gov/resource/${ds.id}.json`;
-      // First: fetch one record to verify dataset exists and log column names
-      const probe = await fetch(`${url}?$limit=1`, { signal: AbortSignal.timeout(8000) });
-      if (!probe.ok) {
-        console.log(`[balt-city] dataset ${ds.id} → ${probe.status}`);
-        continue;
-      }
-      const sample = await probe.json();
-      if (!Array.isArray(sample) || sample.length === 0) {
-        console.log(`[balt-city] dataset ${ds.id} exists but is empty`);
-        continue;
-      }
-      console.log(`[balt-city] dataset ${ds.id} cols:`, Object.keys(sample[0]).join(', '));
-
-      // Check if expected columns exist
-      if (!(ds.numField in sample[0]) || !(ds.nameField in sample[0])) {
-        console.log(`[balt-city] dataset ${ds.id} missing expected fields ${ds.numField}/${ds.nameField}`);
-        continue;
-      }
-
-      // Query by house number only first (more permissive)
-      const q = new URLSearchParams({
-        $where: `${ds.numField}='${parsed.number}'`,
-        $limit: '20',
-      });
-      const res = await fetch(`${url}?${q}`, { signal: AbortSignal.timeout(10000) });
+      const res = await fetch(
+        `https://data.baltimorecity.gov/api/catalog/v1?${new URLSearchParams({ q, limit: '10' })}`,
+        { signal: AbortSignal.timeout(10000) }
+      );
       if (!res.ok) continue;
-      const rows = await res.json();
-      console.log(`[balt-city] dataset ${ds.id}: ${rows.length} rows for house# ${parsed.number}`);
-      if (rows.length === 0) continue;
+      const catalog = await res.json();
+      const datasets = catalog.results || [];
+      console.log(`[balt-city] catalog "${q}":`, datasets.map(d => `${d.resource?.id} — ${d.resource?.name}`).join('\n  ') || '(none)');
 
-      // Find matching street name
-      const match = rows.find(r => {
-        const sn = (r[ds.nameField] || '').toUpperCase();
-        return sn.includes(parsed.name) || parsed.name.includes(sn.replace(/\s+(ST|AVE|DR|RD|LN|CT|PL)$/, '').trim());
-      }) || rows[0];
-
-      console.log(`[balt-city] matched row:`, JSON.stringify(match));
-      return normalizeRow(match);
+      for (const ds of datasets) {
+        const id = ds.resource?.id;
+        if (!id) continue;
+        const result = await queryDataset(id, parsed);
+        if (result) return result;
+      }
     } catch (err) {
-      console.log(`[balt-city] dataset ${ds.id} error: ${err.message}`);
+      console.log(`[balt-city] catalog error for "${q}": ${err.message}`);
     }
   }
   return null;
+}
+
+async function queryDataset(datasetId, parsed) {
+  const url = `https://data.baltimorecity.gov/resource/${datasetId}.json`;
+  try {
+    // Probe for column names
+    const probe = await fetch(`${url}?$limit=1`, { signal: AbortSignal.timeout(8000) });
+    if (!probe.ok) { console.log(`[balt-city] ${datasetId} → ${probe.status}`); return null; }
+    const contentType = probe.headers.get('content-type') || '';
+    if (!contentType.includes('json')) return null;
+    const sample = await probe.json();
+    if (!Array.isArray(sample) || sample.length === 0) return null;
+
+    const cols = Object.keys(sample[0]);
+    console.log(`[balt-city] dataset ${datasetId} (${sample[0].name || ''}) cols:`, cols.join(', '));
+
+    // Identify house number and street name columns
+    const numCol  = cols.find(c => /house|hse_nbr|premise|blk_nbr|^no$|addr.*no/i.test(c));
+    const nameCol = cols.find(c => /street.*name|st_name|streetname|str_nam/i.test(c));
+    if (!numCol || !nameCol) {
+      console.log(`[balt-city] ${datasetId}: no num/name cols (num=${numCol} name=${nameCol})`);
+      return null;
+    }
+
+    // Query by house number
+    const q = new URLSearchParams({ $where: `${numCol}='${parsed.number}'`, $limit: '20' });
+    const res = await fetch(`${url}?${q}`, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    if (!Array.isArray(rows) || rows.length === 0) {
+      console.log(`[balt-city] ${datasetId}: no rows for house# ${parsed.number}`);
+      return null;
+    }
+    console.log(`[balt-city] ${datasetId}: ${rows.length} rows for house# ${parsed.number}`);
+
+    // Match street name
+    const row = rows.find(r => {
+      const sn = (r[nameCol] || '').toUpperCase().replace(/\s+/g, ' ');
+      return sn.includes(parsed.name) || parsed.name.includes(sn.replace(/\s+(ST|AVE|DR|RD|LN|CT|PL)$/, '').trim());
+    }) || rows[0];
+
+    console.log(`[balt-city] matched row:`, JSON.stringify(row));
+    return normalizeRow(row, cols);
+  } catch (err) {
+    console.log(`[balt-city] ${datasetId} query error: ${err.message}`);
+    return null;
+  }
 }
 
 async function scrapeRentalLicenseBaltimoreCity(property) {
   const parsed = parseAddress(property.address);
   if (!parsed) return { error: `Could not parse address: ${property.address}` };
 
-  console.log(`[balt-city] Looking up: ${property.address} → number=${parsed.number} name=${parsed.name}`);
+  console.log(`[balt-city] Looking up: "${property.address}" → number=${parsed.number} name=${parsed.name}`);
 
-  // Try Socrata datasets
-  const sodaResult = await trySODA(parsed);
+  // Try catalog discovery
+  const sodaResult = await discoverDataset(parsed);
   if (sodaResult) return sodaResult;
 
-  // Playwright fallback — DHCD property search
+  // Playwright fallback — try DHCD housing portal
   return await scrapeViaDhcd(property, parsed);
 }
 
@@ -93,38 +105,52 @@ async function scrapeViaDhcd(property, parsed) {
   let browser;
   try {
     browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
-    const page = await browser.newPage();
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    });
+    const page = await context.newPage();
     page.setDefaultTimeout(30000);
 
-    // DHCD rental registration lookup
-    await page.goto('https://dhcd.baltimorecity.gov/Rental/Registration/Search', {
-      waitUntil: 'domcontentloaded', timeout: 30000,
-    }).catch(async () => {
-      // Try alternate DHCD URL
-      await page.goto('https://dhcd.baltimorecity.gov/', {
-        waitUntil: 'domcontentloaded', timeout: 20000,
-      }).catch(() => {});
-    });
+    // Try the DHCD main site and look for rental registration
+    const urls = [
+      'https://dhcd.baltimorecity.gov/',
+      'https://www.baltimorecity.gov/government/departments-offices/housing-and-community-development',
+    ];
 
-    const title = await page.title().catch(() => '');
-    const url   = page.url();
-    console.log(`[balt-city playwright] title="${title}" url="${url}"`);
+    for (const startUrl of urls) {
+      await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+      const title = await page.title().catch(() => '');
+      const currentUrl = page.url();
+      console.log(`[balt-city playwright] ${startUrl} → "${title}" (${currentUrl})`);
 
-    // Look for any search/input forms
-    const inputs = await page.locator('input[type="text"]').all();
-    console.log(`[balt-city playwright] text inputs: ${inputs.length}`);
+      // Look for a rental registration link
+      const regLink = page.locator('a:has-text("Rental Registration"), a:has-text("Registration Search"), a[href*="rental"]').first();
+      if (await regLink.isVisible().catch(() => false)) {
+        console.log('[balt-city playwright] Found rental registration link');
+        await regLink.click();
+        await page.waitForLoadState('domcontentloaded').catch(() => {});
+        break;
+      }
+    }
+
+    const finalTitle = await page.title().catch(() => '');
+    const finalUrl = page.url();
+    console.log(`[balt-city playwright] Final: "${finalTitle}" (${finalUrl})`);
+
+    const inputs = await page.locator('input[type="text"]:visible').all();
+    console.log(`[balt-city playwright] visible text inputs: ${inputs.length}`);
     for (let i = 0; i < inputs.length; i++) {
       const id = await inputs[i].getAttribute('id').catch(() => '');
       const ph = await inputs[i].getAttribute('placeholder').catch(() => '');
       console.log(`  input[${i}] id="${id}" placeholder="${ph}"`);
     }
 
-    if (inputs.length === 0) {
-      console.log('[balt-city playwright] no inputs found — DHCD URL may have changed');
-      return { error: 'Baltimore City rental registration lookup unavailable — please enter manually' };
+    if (inputs.length < 2) {
+      const links = await page.locator('a').allTextContents().catch(() => []);
+      console.log('[balt-city playwright] Links on page:', links.filter(l => l.trim()).slice(0, 20).join(' | '));
+      return { error: 'Baltimore City rental registration lookup: DHCD search form not found. Please enter license info manually.' };
     }
 
-    // Try house number in first input, street name in second
     await inputs[0].fill(parsed.number).catch(() => {});
     if (inputs[1]) await inputs[1].fill(parsed.name).catch(() => {});
 
@@ -133,18 +159,16 @@ async function scrapeViaDhcd(property, parsed) {
     await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 
     const bodyText = await page.innerText('body').catch(() => '');
-    console.log('[balt-city playwright] body excerpt:', bodyText.slice(0, 400));
+    console.log('[balt-city playwright] body:', bodyText.slice(0, 500));
 
     const result = parseResultText(bodyText);
 
-    // Try to download the Property Registration Confirmation Letter
+    // Try to download confirmation letter PDF
     const pdfLink = page.locator([
       'a:has-text("Confirmation Letter")',
       'a:has-text("Registration Letter")',
       'a:has-text("Download")',
       'a[href$=".pdf" i]',
-      'a[href*="letter" i]',
-      'a[href*="confirmation" i]',
     ].join(', ')).first();
 
     const pdfHref = await pdfLink.getAttribute('href').catch(() => null);
@@ -152,27 +176,10 @@ async function scrapeViaDhcd(property, parsed) {
       console.log(`[balt-city playwright] Found PDF link: ${pdfHref}`);
       try {
         const pdfUrl = pdfHref.startsWith('http') ? pdfHref : new URL(pdfHref, page.url()).href;
-        const [ download ] = await Promise.all([
-          page.waitForEvent('download', { timeout: 15000 }).catch(() => null),
-          pdfLink.click(),
-        ]);
-        if (download) {
-          const stream = await download.createReadStream();
-          const chunks = [];
-          await new Promise((resolve, reject) => {
-            stream.on('data', c => chunks.push(c));
-            stream.on('end', resolve);
-            stream.on('error', reject);
-          });
-          result.confirmation_letter = Buffer.concat(chunks);
+        const pdfRes = await fetch(pdfUrl, { signal: AbortSignal.timeout(15000) });
+        if (pdfRes.ok) {
+          result.confirmation_letter = Buffer.from(await pdfRes.arrayBuffer());
           console.log(`[balt-city playwright] Downloaded PDF: ${result.confirmation_letter.length} bytes`);
-        } else {
-          // Direct fetch fallback
-          const pdfRes = await fetch(pdfUrl, { signal: AbortSignal.timeout(15000) });
-          if (pdfRes.ok) {
-            result.confirmation_letter = Buffer.from(await pdfRes.arrayBuffer());
-            console.log(`[balt-city playwright] Fetched PDF: ${result.confirmation_letter.length} bytes`);
-          }
         }
       } catch (err) {
         console.log(`[balt-city playwright] PDF download failed: ${err.message}`);
@@ -205,14 +212,16 @@ function parseResultText(text) {
   };
 }
 
-function normalizeRow(row) {
-  const expRaw   = row.expiration_date || row.exp_date || row.expiry_date || row.expire_date || null;
-  const issueRaw = row.issue_date || row.issued_date || row.start_date   || row.reg_date    || null;
-  const licNum   = row.license_no  || row.certificate_no || row.registration_no || row.record_id || row.reg_no || null;
-  const statusRaw= row.status || row.registration_status || row.appl_status || null;
-  const expDate  = normalizeDate(expRaw);
-  const issDate  = normalizeDate(issueRaw);
-  return { license_number: licNum, status: deriveStatus(statusRaw, expDate), issue_date: issDate, exp_date: expDate };
+function normalizeRow(row, cols) {
+  const pick = (...patterns) => {
+    const col = cols.find(c => patterns.some(p => p.test(c)));
+    return col ? row[col] : null;
+  };
+  const expDate   = normalizeDate(pick(/expir/i, /exp_dt/i));
+  const issueDate = normalizeDate(pick(/issue/i, /iss_dt/i, /start/i, /reg_dt/i));
+  const licNum    = pick(/^license_no$/i, /^cert.*no$/i, /^reg.*no$/i, /^record_id$/i) || null;
+  const statusRaw = pick(/^status$/i, /reg.*status/i, /appl.*status/i) || null;
+  return { license_number: licNum, status: deriveStatus(statusRaw, expDate), issue_date: issueDate, exp_date: expDate };
 }
 
 function normalizeDate(val) {

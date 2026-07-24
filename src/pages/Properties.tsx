@@ -110,6 +110,8 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
     else { setSortCol(col); setSortDir('asc') }
   }
 
+  const mLabel = (m: string) => MUNICIPALITIES.find(x => x.value === m)?.label || m
+
   const NUMERIC_COLS = new Set(['bill_count', 'latest_amount', 'last_pay_amount', 'private_ws'])
 
   const q = search.toLowerCase()
@@ -129,8 +131,6 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
       {children}{sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
     </th>
   )
-
-  const mLabel = (m: string) => MUNICIPALITIES.find(x => x.value === m)?.label || m
 
   return (
     <div>
