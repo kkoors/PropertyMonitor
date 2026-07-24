@@ -14,7 +14,7 @@ const SDAT_SUFFIXES = new Set([
   'ST', 'STREET', 'AVE', 'AVENUE', 'AV', 'RD', 'ROAD', 'DR', 'DRIVE', 'LN', 'LANE',
   'CT', 'COURT', 'PL', 'PLACE', 'WAY', 'BLVD', 'BOULEVARD', 'CIR', 'CIRCLE',
   'TER', 'TERRACE', 'TRL', 'TRAIL', 'PKWY', 'PARKWAY', 'SQ', 'SQUARE',
-  'HWY', 'HIGHWAY', 'ALY', 'ALLEY', 'GARTH', 'MEWS', 'RUN', 'WALK', 'RTE', 'RT',
+  'HWY', 'HIGHWAY', 'ALY', 'ALLEY', 'GARTH', 'MEWS', 'RUN', 'WALK', 'RTE', 'RT', 'LOOP', 'PIKE', 'BEND', 'CRES', 'CRESCENT', 'PLZ', 'PLAZA', 'PATH', 'PASS', 'XING', 'CROSSING',
 ]);
 
 function parseAddress(address) {
@@ -179,8 +179,11 @@ function nameVariants(nameOnly) {
   // SAINT ↔ ST
   if (/\bSAINT\b/.test(name)) out.add(name.replace(/\bSAINT\b/g, 'ST'));
   if (/\bST\b/.test(name)) out.add(name.replace(/\bST\b/g, 'SAINT'));
+  // Unrecognized street type still attached? Try without the last word
+  const words = name.split(' ');
+  if (words.length > 1) out.add(words.slice(0, -1).join(' '));
   // Last resort: prefix of the first word, trailing S dropped (matches both spellings)
-  const first = name.split(' ')[0].replace(/S$/, '');
+  const first = words[0].replace(/S$/, '');
   if (first.length >= 4) out.add(first);
 
   return [...out];
