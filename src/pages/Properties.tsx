@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import type React from 'react'
 import { useLocalState } from '../useLocalState'
+import { mapAppfolioCsv, type ImportRow } from '../appfolioCsv'
 
 const MUNICIPALITIES = [
   { value: 'baltimore_city', label: 'Baltimore City' },
@@ -26,6 +27,10 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
   const [checkResult, setCheckResult] = useState<Record<number, string>>({})
   const [creds, setCreds] = useState({ username: '', password: '' })
   const [storedCreds, setStoredCreds] = useState<any[]>([])
+  const [importRows, setImportRows] = useState<ImportRow[] | null>(null)
+  const [importWarnings, setImportWarnings] = useState<string[]>([])
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState('')
   const [filterMuni, setFilterMuni] = useLocalState('props.filterMuni', '')
   const [showPrivate, setShowPrivate] = useLocalState('props.showPrivate', false)
   const [search, setSearch] = useLocalState('props.search', '')
@@ -115,6 +120,42 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
     setCredModal(null)
   }
 
+  function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const reader = new FileReader()
+    reader.onload = () => {
+      const { rows, warnings } = mapAppfolioCsv(String(reader.result || ''))
+      // Mark rows whose street already exists so the preview shows update vs create
+      const normStreet = (a: string) => a.split(',')[0].toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+      const known = new Set(properties.map(p => normStreet(p.address || '')))
+      setImportRows(rows.map(r => ({ ...r, matched: known.has(normStreet(r.address)) })))
+      setImportWarnings(warnings)
+      setImportResult('')
+    }
+    reader.readAsText(file)
+  }
+
+  async function runImport() {
+    if (!importRows) return
+    setImporting(true)
+    try {
+      const res = await fetch('/api/properties/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: importRows }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setImportResult(`Import failed: ${data.error}`); return }
+      setImportResult(`Imported — ${data.created} created, ${data.updated} updated, ${data.skipped} skipped.`)
+      setImportRows(null)
+      load()
+    } finally {
+      setImporting(false)
+    }
+  }
+
   function toggleSort(col: typeof sortCol) {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortCol(col); setSortDir('asc') }
@@ -154,10 +195,58 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
         <button className={`btn btn-sm ${showPrivate ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setShowPrivate(s => !s)}>
           {showPrivate ? 'Hide Private W/S' : 'Show Private W/S'}
         </button>
+        <label className="btn btn-ghost" style={{ cursor: 'pointer' }}>
+          Import AppFolio CSV
+          <input type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={onImportFile} />
+        </label>
         <button className="btn btn-primary" onClick={() => { setShowForm(true); setEditId(null); setForm({ ...BLANK }) }}>
           + Add Property
         </button>
       </div>
+
+      {importResult && <div className="card" style={{ color: '#059669', fontSize: 13 }}>{importResult}</div>}
+
+      {importRows && (
+        <div className="card">
+          <h2>Import Preview — {importRows.length} rows</h2>
+          {importWarnings.map(w => <div key={w} style={{ color: '#d97706', fontSize: 13 }}>⚠ {w}</div>)}
+          <p style={{ fontSize: 13, color: '#6b7280', margin: '8px 0' }}>
+            Matched rows update owner info on the existing property. New rows are created with the selected municipality. Uncheck to skip.
+          </p>
+          <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+            <table style={{ width: '100%' }}>
+              <thead>
+                <tr><th></th><th>Action</th><th>Name</th><th>Address</th><th>Municipality</th><th>Owner</th><th>Owner Address</th></tr>
+              </thead>
+              <tbody>
+                {importRows.map((r, i) => (
+                  <tr key={i} style={{ opacity: r.skip ? 0.4 : 1 }}>
+                    <td><input type="checkbox" checked={!r.skip} onChange={e => setImportRows(rows => rows!.map((x, j) => j === i ? { ...x, skip: !e.target.checked } : x))} /></td>
+                    <td style={{ fontWeight: 600, color: r.matched ? '#2563eb' : '#059669' }}>{r.matched ? 'Update' : 'Create'}</td>
+                    <td>{r.name}</td>
+                    <td style={{ fontSize: 13 }}>{r.address}</td>
+                    <td>
+                      {r.matched ? <span style={{ color: '#9ca3af', fontSize: 12 }}>existing</span> : (
+                        <select value={r.municipality} onChange={e => setImportRows(rows => rows!.map((x, j) => j === i ? { ...x, municipality: e.target.value } : x))}>
+                          {MUNICIPALITIES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                        </select>
+                      )}
+                    </td>
+                    <td style={{ fontSize: 13 }}>{r.owner_name}</td>
+                    <td style={{ fontSize: 13 }}>{r.owner_address}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="form-actions">
+            <button className="btn btn-primary" onClick={runImport} disabled={importing}>
+              {importing ? 'Importing…' : `Import ${importRows.filter(r => !r.skip).length} rows`}
+            </button>
+            <button className="btn btn-ghost" onClick={() => setImportRows(null)}>Cancel</button>
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <div className="card">

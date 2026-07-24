@@ -48,6 +48,42 @@ module.exports = function makePropertiesRouter(db) {
     res.json({ ok: true });
   });
 
+  // Bulk import from AppFolio CSV (rows already parsed/mapped client-side).
+  // Matches existing properties by street line of the address; updates owner
+  // info on matches, creates the rest.
+  router.post('/import', (req, res) => {
+    const { rows } = req.body || {};
+    if (!Array.isArray(rows)) return res.status(400).json({ error: 'rows array required' });
+
+    const normStreet = a => (a || '').split(',')[0].toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const existing = db.prepare(`SELECT id, address FROM properties`).all()
+      .map(p => ({ id: p.id, key: normStreet(p.address) }));
+
+    let created = 0, updated = 0, skipped = 0;
+    for (const row of rows) {
+      if (row.skip) { skipped++; continue; }
+      if (!row.address) { skipped++; continue; }
+      const key = normStreet(row.address);
+      const match = existing.find(e => e.key && e.key === key);
+
+      if (match) {
+        db.prepare(`UPDATE properties SET
+            owner_name = COALESCE(NULLIF(?, ''), owner_name),
+            owner_address = COALESCE(NULLIF(?, ''), owner_address),
+            name = CASE WHEN name = '' OR name IS NULL THEN ? ELSE name END
+          WHERE id = ?`)
+          .run(row.owner_name || '', row.owner_address || '', row.name || '', match.id);
+        updated++;
+      } else {
+        if (!row.name || !row.municipality) { skipped++; continue; }
+        db.prepare(`INSERT INTO properties (name, address, municipality, owner_name, owner_address) VALUES (?,?,?,?,?)`)
+          .run(row.name, row.address, row.municipality, row.owner_name || null, row.owner_address || null);
+        created++;
+      }
+    }
+    res.json({ created, updated, skipped });
+  });
+
   router.delete('/:id', (req, res) => {
     db.prepare(`DELETE FROM bills WHERE property_id = ?`).run(req.params.id);
     db.prepare(`DELETE FROM credentials WHERE property_id = ?`).run(req.params.id);
