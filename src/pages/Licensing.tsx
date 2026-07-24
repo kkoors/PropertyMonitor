@@ -75,12 +75,28 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
                 </td>
                 <td style={{ color: '#6b7280', cursor: 'pointer' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">{r.address}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>{r.municipality === 'baltimore_city' ? 'Baltimore City' : 'Baltimore County'}</td>
+                {r.licenses && r.licenses.length > 1 ? (
+                  <td colSpan={4} style={{ fontSize: 12 }}>
+                    {r.licenses.map((l: any) => (
+                      <div key={l.unit || l.license_number} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '1px 0', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontWeight: 700, minWidth: 46 }}>Unit {l.unit || '?'}</span>
+                        <span style={{ fontFamily: 'monospace' }}>{l.license_number}</span>
+                        <span style={{
+                          padding: '0 6px', borderRadius: 4, fontWeight: 600,
+                          background: STATUS_BG[l.status] || '#f3f4f6', color: STATUS_TEXT[l.status] || '#6b7280',
+                        }}>{l.status}</span>
+                        <span style={{ color: '#6b7280' }}>exp {l.exp_date || '—'}</span>
+                      </div>
+                    ))}
+                  </td>
+                ) : (<>
                 <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{r.license_number || <span style={{color:'#9ca3af'}}>—</span>}</td>
                 <td style={{ background: STATUS_BG[r.status] || '#f3f4f6', color: STATUS_TEXT[r.status] || '#6b7280', fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>
                   {r.status ? r.status.replace('_', ' ') : 'never checked'}
                 </td>
                 <td>{r.issue_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
                 <td>{r.exp_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
+                </>)}
                 <td style={{
                   background: r.municipality === 'baltimore_city' ? (STATUS_BG[r.reg_status] || '#f3f4f6') : undefined,
                   color: r.municipality === 'baltimore_city' ? (STATUS_TEXT[r.reg_status] || '#6b7280') : '#9ca3af',

@@ -147,6 +147,7 @@ function initSchema(db) {
   if (!cols.includes('confirmation_letter')) {
     db.prepare(`ALTER TABLE rental_licenses ADD COLUMN confirmation_letter BLOB`).run();
   }
+  if (!cols.includes('unit')) db.prepare(`ALTER TABLE rental_licenses ADD COLUMN unit TEXT DEFAULT ''`).run();
 
   const leadCols = db.prepare(`PRAGMA table_info(lead_records)`).all().map(c => c.name);
   if (!leadCols.includes('tracking_id')) db.prepare(`ALTER TABLE lead_records ADD COLUMN tracking_id TEXT`).run();

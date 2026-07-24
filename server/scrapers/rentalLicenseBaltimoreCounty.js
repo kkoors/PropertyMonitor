@@ -39,7 +39,7 @@ async function scrapeRentalLicenseBaltimoreCounty(property) {
     where,
     outFields: '*',
     f: 'json',
-    resultRecordCount: '5',
+    resultRecordCount: '50',
   });
 
   try {
@@ -48,20 +48,38 @@ async function scrapeRentalLicenseBaltimoreCounty(property) {
     const data = await res.json();
 
     if (!data.features || data.features.length === 0) {
-      return { license_number: null, status: 'not_found', exp_date: null };
+      return { license_number: null, status: 'not_found', exp_date: null, licenses: [] };
     }
 
-    const f = data.features[0].attributes;
-    const expDate = f.EXPIRATION_DATE ? new Date(f.EXPIRATION_DATE).toISOString().slice(0, 10) : null;
-    const issueDate = f.ISSUE_DATE ? new Date(f.ISSUE_DATE).toISOString().slice(0, 10) : null;
-    const status = normalizeStatus(f.B1_APPL_STATUS, expDate);
-    const licenseNumber = f.B1_RECORD_ID || null;
+    // One record per licensed unit — keep the latest expiration per unit
+    const byUnit = new Map();
+    for (const { attributes: f } of data.features) {
+      const unit = f.B1_UNIT_START != null && f.B1_UNIT_START !== '' ? String(f.B1_UNIT_START) : '';
+      const prev = byUnit.get(unit);
+      if (!prev || (f.EXPIRATION_DATE || 0) > (prev.EXPIRATION_DATE || 0)) byUnit.set(unit, f);
+    }
 
-    const result = { license_number: licenseNumber, status, issue_date: issueDate, exp_date: expDate };
+    const licenses = [...byUnit.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }))
+      .map(([unit, f]) => {
+        const expDate = f.EXPIRATION_DATE ? new Date(f.EXPIRATION_DATE).toISOString().slice(0, 10) : null;
+        return {
+          unit,
+          license_number: f.B1_RECORD_ID || null,
+          status: normalizeStatus(f.B1_APPL_STATUS, expDate),
+          issue_date: f.ISSUE_DATE ? new Date(f.ISSUE_DATE).toISOString().slice(0, 10) : null,
+          exp_date: expDate,
+        };
+      });
+    console.log(`[balt-county] ${parsed.number} ${parsed.name}: ${licenses.length} unit license(s): ${licenses.map(l => `${l.unit || '(whole)'}=${l.status}`).join(', ')}`);
+
+    // Back-compat top-level = first (or only) license
+    const best = licenses.find(l => l.status === 'active') || licenses[0];
+    const result = { ...best, licenses };
 
     // Try to download the license certificate PDF from the Accela citizen portal
-    if (licenseNumber) {
-      const pdf = await downloadLicensePdf(licenseNumber);
+    if (best.license_number) {
+      const pdf = await downloadLicensePdf(best.license_number);
       if (pdf) result.confirmation_letter = pdf;
     }
 

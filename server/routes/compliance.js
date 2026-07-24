@@ -27,6 +27,21 @@ function billStatus(property) {
 function rentalLicenseStatus(licenses, municipality) {
   const relevant = licenses.filter(l => l.municipality === municipality);
   if (relevant.length === 0) return { status: 'red', label: 'No license on file' };
+
+  // Multi-unit: every unit needs an active license
+  if (relevant.length > 1) {
+    const now = new Date();
+    const bad = relevant.filter(l => l.status !== 'active' || (l.exp_date && new Date(l.exp_date) < now));
+    if (bad.length > 0) return { status: 'red', label: `Units lapsed: ${bad.map(l => l.unit || '?').join(', ')} (${relevant.length - bad.length}/${relevant.length} OK)` };
+    const soonest = relevant.filter(l => l.exp_date).sort((a, b) => a.exp_date.localeCompare(b.exp_date))[0];
+    if (soonest) {
+      const daysLeft = DAYS(new Date(soonest.exp_date) - now);
+      if (daysLeft < 60) return { status: 'yellow', label: `Unit ${soonest.unit || '?'} expires in ${daysLeft}d` };
+      return { status: 'green', label: `${relevant.length}/${relevant.length} units licensed` };
+    }
+    return { status: 'green', label: `${relevant.length}/${relevant.length} units licensed` };
+  }
+
   const active = relevant.find(l => l.status === 'active');
   if (!active) {
     const expired = relevant.find(l => l.status === 'expired');
@@ -159,7 +174,7 @@ module.exports = function makeComplianceRouter(db) {
     `).all();
 
     const result = properties.map(p => {
-      const allLicenses = db.prepare(`SELECT id, municipality, license_type, license_number, status, issue_date, exp_date, scraped_at, notes, (confirmation_letter IS NOT NULL) as has_letter FROM rental_licenses WHERE property_id = ?`).all(p.id);
+      const allLicenses = db.prepare(`SELECT id, municipality, license_type, unit, license_number, status, issue_date, exp_date, scraped_at, notes, (confirmation_letter IS NOT NULL) as has_letter FROM rental_licenses WHERE property_id = ?`).all(p.id);
       const licenses = allLicenses.filter(l => l.license_type === 'rental_license');
       const registrations = allLicenses.filter(l => l.license_type === 'registration');
       const allLead = db.prepare(`SELECT * FROM lead_records WHERE property_id = ? ORDER BY inspection_date DESC`).all(p.id);
@@ -228,6 +243,19 @@ module.exports = function makeComplianceRouter(db) {
     if (result.registration) upsertLicense(propertyId, 'baltimore_city', result.registration, 'registration');
   }
 
+  // County scrapes return { licenses: [per-unit rows] } — replace all unit rows
+  function storeCountyResult(propertyId, result) {
+    if (Array.isArray(result.licenses) && result.licenses.length > 0) {
+      db.prepare(`DELETE FROM rental_licenses WHERE property_id = ? AND municipality = 'baltimore_county' AND license_type = 'rental_license'`).run(propertyId);
+      const ins = db.prepare(`INSERT INTO rental_licenses (property_id, municipality, license_type, unit, license_number, status, issue_date, exp_date, confirmation_letter, scraped_at) VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))`);
+      result.licenses.forEach((l, i) => {
+        ins.run(propertyId, 'baltimore_county', 'rental_license', l.unit || '', l.license_number, l.status, l.issue_date || null, l.exp_date || null, i === 0 ? (result.confirmation_letter || null) : null);
+      });
+    } else {
+      upsertLicense(propertyId, 'baltimore_county', result);
+    }
+  }
+
   // Download stored confirmation letter PDF
   router.get('/rental-license/letter/:propertyId/:municipality', (req, res) => {
     const row = db.prepare(`SELECT confirmation_letter FROM rental_licenses WHERE property_id = ? AND municipality = ? AND license_type = 'rental_license'`).get(req.params.propertyId, req.params.municipality);
@@ -245,7 +273,7 @@ module.exports = function makeComplianceRouter(db) {
 
     const result = await scrapeRentalLicenseBaltimoreCounty(property);
     if (result.error) return res.status(422).json({ error: result.error });
-    upsertLicense(property.id, 'baltimore_county', result);
+    storeCountyResult(property.id, result);
     res.json(result);
   });
 
@@ -255,7 +283,7 @@ module.exports = function makeComplianceRouter(db) {
     if (!property) return res.status(404).json({ error: 'Not found' });
     const result = await scrapeRentalLicenseBaltimoreCounty(property);
     if (result.error) return res.status(422).json({ error: result.error });
-    upsertLicense(property.id, 'baltimore_county', result);
+    storeCountyResult(property.id, result);
     res.json(result);
   });
 
@@ -284,7 +312,7 @@ module.exports = function makeComplianceRouter(db) {
       }
       if (!result.error) {
         if (property.municipality === 'baltimore_city') storeCityResult(property.id, result);
-        else upsertLicense(property.id, property.municipality, result);
+        else storeCountyResult(property.id, result);
       }
       results.push({ id: property.id, name: property.name, municipality: property.municipality, ...result });
     }
@@ -348,17 +376,28 @@ module.exports = function makeComplianceRouter(db) {
 
   // ── Licensing dashboard ───────────────────────────────────────────────────
   router.get('/licenses', (req, res) => {
-    const rows = db.prepare(`
-      SELECT p.id, p.name, p.address, p.municipality, p.commercial, p.license_not_monitored,
-             l.license_number, l.status, l.issue_date, l.exp_date, l.scraped_at,
-             (l.confirmation_letter IS NOT NULL) as has_letter,
-             r.license_number as reg_number, r.status as reg_status, r.exp_date as reg_exp_date
-      FROM properties p
-      LEFT JOIN rental_licenses l ON l.property_id = p.id AND l.municipality = p.municipality AND l.license_type = 'rental_license'
-      LEFT JOIN rental_licenses r ON r.property_id = p.id AND r.municipality = p.municipality AND r.license_type = 'registration'
-      WHERE p.active = 1
-      ORDER BY p.name
-    `).all();
+    const props = db.prepare(`SELECT id, name, address, municipality, commercial, license_not_monitored FROM properties WHERE active = 1 ORDER BY name`).all();
+    const rows = props.map(p => {
+      const licenses = db.prepare(`SELECT unit, license_number, status, issue_date, exp_date, scraped_at, (confirmation_letter IS NOT NULL) as has_letter FROM rental_licenses WHERE property_id = ? AND municipality = ? AND license_type = 'rental_license' ORDER BY unit`).all(p.id, p.municipality);
+      const reg = db.prepare(`SELECT license_number, status, exp_date FROM rental_licenses WHERE property_id = ? AND municipality = ? AND license_type = 'registration'`).get(p.id, p.municipality);
+      const first = licenses[0] || {};
+      return {
+        ...p,
+        licenses,
+        // flat fields (first/summary row) keep sorting simple
+        license_number: first.license_number || null,
+        status: licenses.length > 1
+          ? (licenses.every(l => l.status === 'active') ? 'active' : 'expired')
+          : (first.status || null),
+        issue_date: first.issue_date || null,
+        exp_date: first.exp_date || null,
+        scraped_at: first.scraped_at || null,
+        has_letter: licenses.some(l => l.has_letter),
+        reg_number: reg?.license_number || null,
+        reg_status: reg?.status || null,
+        reg_exp_date: reg?.exp_date || null,
+      };
+    });
     res.json(rows);
   });
 
