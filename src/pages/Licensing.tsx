@@ -66,54 +66,52 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
             </tr>
           </thead>
           <tbody>
-            {monitored.map(r => (
-              <tr key={r.id}>
-                <td>
-                  <button className="btn btn-ghost btn-sm" style={{ fontWeight: 700, fontSize: 14, padding: '2px 6px', textAlign: 'left' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">
-                    {r.name}
-                  </button>
-                </td>
-                <td style={{ color: '#6b7280', cursor: 'pointer' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">{r.address}</td>
-                <td style={{ whiteSpace: 'nowrap' }}>{r.municipality === 'baltimore_city' ? 'Baltimore City' : 'Baltimore County'}</td>
-                {r.licenses && r.licenses.length > 1 ? (
-                  <td colSpan={4} style={{ fontSize: 12 }}>
-                    {r.licenses.map((l: any) => (
-                      <div key={l.unit || l.license_number} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '1px 0', whiteSpace: 'nowrap' }}>
-                        <span style={{ fontWeight: 700, minWidth: 46 }}>Unit {l.unit || '?'}</span>
-                        <span style={{ fontFamily: 'monospace' }}>{l.license_number}</span>
-                        <span style={{
-                          padding: '0 6px', borderRadius: 4, fontWeight: 600,
-                          background: STATUS_BG[l.status] || '#f3f4f6', color: STATUS_TEXT[l.status] || '#6b7280',
-                        }}>{l.status}</span>
-                        <span style={{ color: '#6b7280' }}>exp {l.exp_date || '—'}</span>
-                      </div>
-                    ))}
-                  </td>
-                ) : (<>
-                <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{r.license_number || <span style={{color:'#9ca3af'}}>—</span>}</td>
-                <td style={{ background: STATUS_BG[r.status] || '#f3f4f6', color: STATUS_TEXT[r.status] || '#6b7280', fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>
-                  {r.status ? r.status.replace('_', ' ') : 'never checked'}
-                </td>
-                <td>{r.issue_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
-                <td>{r.exp_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
-                </>)}
-                <td style={{
-                  background: r.municipality === 'baltimore_city' ? (STATUS_BG[r.reg_status] || '#f3f4f6') : undefined,
-                  color: r.municipality === 'baltimore_city' ? (STATUS_TEXT[r.reg_status] || '#6b7280') : '#9ca3af',
-                  fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap',
-                }}>
-                  {r.municipality === 'baltimore_city' ? (r.reg_status ? r.reg_status.replace('_', ' ') : 'never checked') : 'n/a'}
-                </td>
-                <td>{r.municipality === 'baltimore_city' ? (r.reg_exp_date || <span style={{color:'#9ca3af'}}>—</span>) : <span style={{color:'#9ca3af'}}>—</span>}</td>
-                <td>{r.has_letter ? <a href={`/api/compliance/rental-license/letter/${r.id}/${r.municipality}`} target="_blank" rel="noreferrer">📄</a> : <span style={{color:'#9ca3af'}}>—</span>}</td>
-                <td style={{ fontSize: 12, color: '#6b7280' }}>{r.scraped_at ? r.scraped_at.slice(0, 10) : '—'}</td>
-                <td style={{ whiteSpace: 'nowrap' }}>
-                  <button className="btn btn-primary btn-sm" onClick={() => check(r)} disabled={checking === r.id}>
-                    {checking === r.id ? '⟳…' : '⟳ Check'}
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {monitored.flatMap(r => {
+              const lics: any[] = r.licenses && r.licenses.length > 0 ? r.licenses : [null]
+              const span = lics.length
+              return lics.map((l: any, i: number) => {
+                const lic = l || r // single/never-checked rows fall back to flat fields
+                return (
+                  <tr key={`${r.id}-${l?.unit ?? i}`}>
+                    {i === 0 && (<>
+                      <td rowSpan={span}>
+                        <button className="btn btn-ghost btn-sm" style={{ fontWeight: 700, fontSize: 14, padding: '2px 6px', textAlign: 'left' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">
+                          {r.name}
+                        </button>
+                      </td>
+                      <td rowSpan={span} style={{ color: '#6b7280', cursor: 'pointer' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">{r.address}</td>
+                      <td rowSpan={span} style={{ whiteSpace: 'nowrap' }}>{r.municipality === 'baltimore_city' ? 'Baltimore City' : 'Baltimore County'}</td>
+                    </>)}
+                    <td style={{ fontFamily: 'monospace', fontSize: 13, whiteSpace: 'nowrap' }}>
+                      {span > 1 && <span style={{ fontFamily: 'inherit', fontWeight: 700, marginRight: 6 }}>Unit {l.unit || '?'}</span>}
+                      {lic.license_number || <span style={{color:'#9ca3af'}}>—</span>}
+                    </td>
+                    <td style={{ background: STATUS_BG[lic.status] || '#f3f4f6', color: STATUS_TEXT[lic.status] || '#6b7280', fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>
+                      {lic.status ? String(lic.status).replace('_', ' ') : 'never checked'}
+                    </td>
+                    <td>{lic.issue_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
+                    <td>{lic.exp_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
+                    {i === 0 && (<>
+                      <td rowSpan={span} style={{
+                        background: r.municipality === 'baltimore_city' ? (STATUS_BG[r.reg_status] || '#f3f4f6') : undefined,
+                        color: r.municipality === 'baltimore_city' ? (STATUS_TEXT[r.reg_status] || '#6b7280') : '#9ca3af',
+                        fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap',
+                      }}>
+                        {r.municipality === 'baltimore_city' ? (r.reg_status ? r.reg_status.replace('_', ' ') : 'never checked') : 'n/a'}
+                      </td>
+                      <td rowSpan={span}>{r.municipality === 'baltimore_city' ? (r.reg_exp_date || <span style={{color:'#9ca3af'}}>—</span>) : <span style={{color:'#9ca3af'}}>—</span>}</td>
+                      <td rowSpan={span}>{r.has_letter ? <a href={`/api/compliance/rental-license/letter/${r.id}/${r.municipality}`} target="_blank" rel="noreferrer">📄</a> : <span style={{color:'#9ca3af'}}>—</span>}</td>
+                      <td rowSpan={span} style={{ fontSize: 12, color: '#6b7280' }}>{r.scraped_at ? r.scraped_at.slice(0, 10) : '—'}</td>
+                      <td rowSpan={span} style={{ whiteSpace: 'nowrap' }}>
+                        <button className="btn btn-primary btn-sm" onClick={() => check(r)} disabled={checking === r.id}>
+                          {checking === r.id ? '⟳…' : '⟳ Check'}
+                        </button>
+                      </td>
+                    </>)}
+                  </tr>
+                )
+              })
+            })}
           </tbody>
         </table>
         {monitored.length === 0 && <div className="empty">No properties require rental licensing.</div>}
