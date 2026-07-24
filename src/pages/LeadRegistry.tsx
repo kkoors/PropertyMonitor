@@ -79,63 +79,62 @@ export default function LeadRegistry({ onEditProperty }: { onEditProperty?: (id:
           <thead>
             <tr>
               <Th col="name">Property</Th><Th col="tracking_id">Tracking ID</Th><Th col="registry_owner">Registry Owner</Th><th>Registry Owner Address</th>
-              <Th col="registration_date">Registered</Th><Th col="bank_date">Bank Date</Th><Th col="payment_year">Paid Thru</Th><Th col="cert_status">Cert</Th><th>Units</th><th>Actions</th>
+              <Th col="registration_date">Registered</Th><Th col="bank_date">Bank Date</Th><Th col="payment_year">Paid Thru</Th>
+              <th>Unit</th><Th col="cert_status">Cert</Th><th>Inspected</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {monitored.map(r => {
+            {monitored.flatMap(r => {
               const payOk = r.payment_year && Number(r.payment_year) >= currentYear
-              return (
-                <tr key={r.id}>
-                  <td>
-                    <button className="btn btn-ghost btn-sm" style={{ fontWeight: 700, fontSize: 14, padding: '2px 6px', textAlign: 'left' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">
-                      {r.name}
-                    </button>
-                    <div style={{ fontSize: 12, color: '#6b7280', paddingLeft: 6, cursor: 'pointer' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">{r.address}</div>
-                  </td>
-                  <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{r.tracking_id || <span style={{color:'#9ca3af'}}>—</span>}</td>
-                  <td>
-                    {r.registry_owner || <span style={{color:'#9ca3af'}}>—</span>}
-                    <div><MatchBadge ok={r.owner_name_match} label="owner" /></div>
-                  </td>
-                  <td style={{ fontSize: 13 }}>
-                    {r.registry_owner_address || <span style={{color:'#9ca3af'}}>—</span>}
-                    <div><MatchBadge ok={r.owner_address_match} label="address" /></div>
-                  </td>
-                  <td>{r.registration_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
-                  <td>{r.bank_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
-                  <td style={{
-                    background: r.payment_year ? (payOk ? '#dcfce7' : '#fee2e2') : '#f3f4f6',
-                    color: r.payment_year ? (payOk ? '#166534' : '#991b1b') : '#6b7280',
-                    fontWeight: 700, fontSize: 14,
-                  }}>
-                    {r.payment_year || '—'}
-                  </td>
+              // Multifamily with unit certs → one row per unit; otherwise a single row from the property-level cert
+              const units: any[] = (r.multifamily && r.units.length > 0)
+                ? r.units
+                : [{ unit: r.multifamily ? '?' : '', cert_number: r.cert_number, cert_status: r.cert_status, inspection_date: r.inspection_date }]
+              const span = units.length
+              return units.map((u: any, i: number) => (
+                <tr key={`${r.id}-${u.unit ?? i}`}>
+                  {i === 0 && (<>
+                    <td rowSpan={span}>
+                      <button className="btn btn-ghost btn-sm" style={{ fontWeight: 700, fontSize: 14, padding: '2px 6px', textAlign: 'left' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">
+                        {r.name}
+                      </button>
+                      <div style={{ fontSize: 12, color: '#6b7280', paddingLeft: 6, cursor: 'pointer' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">{r.address}</div>
+                    </td>
+                    <td rowSpan={span} style={{ fontFamily: 'monospace', fontSize: 13 }}>{r.tracking_id || <span style={{color:'#9ca3af'}}>—</span>}</td>
+                    <td rowSpan={span}>
+                      {r.registry_owner || <span style={{color:'#9ca3af'}}>—</span>}
+                      <div><MatchBadge ok={r.owner_name_match} label="owner" /></div>
+                    </td>
+                    <td rowSpan={span} style={{ fontSize: 13 }}>
+                      {r.registry_owner_address || <span style={{color:'#9ca3af'}}>—</span>}
+                      <div><MatchBadge ok={r.owner_address_match} label="address" /></div>
+                    </td>
+                    <td rowSpan={span}>{r.registration_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
+                    <td rowSpan={span}>{r.bank_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
+                    <td rowSpan={span} style={{
+                      background: r.payment_year ? (payOk ? '#dcfce7' : '#fee2e2') : '#f3f4f6',
+                      color: r.payment_year ? (payOk ? '#166534' : '#991b1b') : '#6b7280',
+                      fontWeight: 700, fontSize: 14,
+                    }}>
+                      {r.payment_year || '—'}
+                    </td>
+                  </>)}
+                  <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{r.multifamily ? (u.unit || '?') : <span style={{color:'#9ca3af'}}>—</span>}</td>
                   <td style={{ whiteSpace: 'nowrap', fontSize: 13 }}>
-                    {r.cert_number
-                      ? <span style={{ color: (r.cert_status || '').includes('PASS') ? '#166534' : '#991b1b', fontWeight: 600 }}>{r.cert_number} {r.cert_status}</span>
-                      : <span style={{color:'#9ca3af'}}>—</span>}
+                    {u.cert_number
+                      ? <span style={{ color: (u.cert_status || '').includes('PASS') ? '#166534' : '#991b1b', fontWeight: 600 }}>{u.cert_number} {u.cert_status}</span>
+                      : <span style={{color:'#9ca3af'}}>{r.multifamily ? 'no cert' : '—'}</span>}
                   </td>
-                  <td style={{ fontSize: 12 }}>
-                    {r.multifamily
-                      ? (r.units.length > 0
-                          ? r.units.map((u: any) => (
-                              <span key={u.unit} title={`${u.cert_number || ''} ${u.inspection_date || ''}`} style={{
-                                display: 'inline-block', margin: '1px 2px', padding: '1px 6px', borderRadius: 4, fontWeight: 600,
-                                background: (u.cert_status || '').includes('PASS') ? '#dcfce7' : '#fee2e2',
-                                color: (u.cert_status || '').includes('PASS') ? '#166534' : '#991b1b',
-                              }}>{u.unit || '?'}</span>
-                            ))
-                          : <span style={{color:'#9ca3af'}}>no unit certs</span>)
-                      : <span style={{color:'#9ca3af'}}>single</span>}
-                  </td>
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    <button className="btn btn-primary btn-sm" onClick={() => check(r)} disabled={checking === r.id}>
-                      {checking === r.id ? '⟳…' : '⟳ Check'}
-                    </button>
-                  </td>
+                  <td style={{ whiteSpace: 'nowrap', fontSize: 13 }}>{u.inspection_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
+                  {i === 0 && (
+                    <td rowSpan={span} style={{ whiteSpace: 'nowrap' }}>
+                      <button className="btn btn-primary btn-sm" onClick={() => check(r)} disabled={checking === r.id}>
+                        {checking === r.id ? '⟳…' : '⟳ Check'}
+                      </button>
+                    </td>
+                  )}
                 </tr>
-              )
+              ))
             })}
           </tbody>
         </table>
