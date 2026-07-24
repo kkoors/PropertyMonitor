@@ -198,6 +198,7 @@ module.exports = function makeComplianceRouter(db) {
         id: p.id,
         name: p.name,
         address: p.address,
+        owner_name: p.owner_name || null,
         municipality: p.municipality,
         year_built: p.year_built,
         lead_free: p.lead_free,

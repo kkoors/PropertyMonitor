@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 
 type Status = 'green' | 'yellow' | 'red' | 'unknown' | 'na'
-type SortCol = 'name' | 'municipality' | 'year_built' | 'water' | 'rental_license' | 'city_registration' | 'lead_registration' | 'lead_cert'
+type SortCol = 'name' | 'owner_name' | 'municipality' | 'year_built' | 'water' | 'rental_license' | 'city_registration' | 'lead_registration' | 'lead_cert'
 
 interface ComplianceItem { status: Status; label: string }
 interface PropertyRow {
@@ -124,11 +124,13 @@ export default function Compliance({ onEditProperty }: Props) {
       !q ||
       r.name.toLowerCase().includes(q) ||
       r.address.toLowerCase().includes(q) ||
+      (r.owner_name || '').toLowerCase().includes(q) ||
       (MUNI_LABEL[r.municipality] || r.municipality).toLowerCase().includes(q)
     )
     return [...filtered].sort((a, b) => {
       let cmp = 0
       if (sortCol === 'name') cmp = a.name.localeCompare(b.name)
+      else if (sortCol === 'owner_name') cmp = (a.owner_name || '').localeCompare(b.owner_name || '')
       else if (sortCol === 'municipality') cmp = a.municipality.localeCompare(b.municipality)
       else if (sortCol === 'year_built') cmp = (a.year_built ?? 0) - (b.year_built ?? 0)
       else if (sortCol === 'water') cmp = STATUS_ORDER[a.water.status] - STATUS_ORDER[b.water.status]
@@ -196,6 +198,7 @@ export default function Compliance({ onEditProperty }: Props) {
           <thead>
             <tr>
               <Th col="name">Property</Th>
+              <Th col="owner_name">Owner</Th>
               <Th col="municipality">Municipality</Th>
               <Th col="year_built">Year Built</Th>
               <Th col="water">Water Bills</Th>
@@ -220,6 +223,7 @@ export default function Compliance({ onEditProperty }: Props) {
                   </button>
                   <div style={{ fontSize: 12, color: '#9ca3af', paddingLeft: 6 }}>{r.address}</div>
                 </td>
+                <td style={{ fontSize: 14 }}>{r.owner_name || <span style={{ color: '#9ca3af' }}>—</span>}</td>
                 <td style={{ fontSize: 14 }}>{MUNI_LABEL[r.municipality] || r.municipality}</td>
                 <td style={{ textAlign: 'center', fontSize: 14 }}>
                   {r.year_built ?? <span style={{ color: '#9ca3af' }}>—</span>}
