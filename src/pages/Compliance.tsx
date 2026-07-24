@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 
 type Status = 'green' | 'yellow' | 'red' | 'unknown' | 'na'
+type SortCol = 'name' | 'municipality' | 'year_built' | 'water' | 'rental_license' | 'lead'
 
 interface ComplianceItem { status: Status; label: string }
 interface PropertyRow {
@@ -36,10 +37,12 @@ const STATUS_TEXT: Record<Status, string> = {
   na:      '#9ca3af',
 }
 
+const STATUS_ORDER: Record<Status, number> = { red: 0, yellow: 1, unknown: 2, na: 3, green: 4 }
+
 const MUNI_LABEL: Record<string, string> = {
-  baltimore_city:   'Balt. City',
-  baltimore_county: 'Balt. County',
-  harford:          'Harford',
+  baltimore_city:   'Baltimore City',
+  baltimore_county: 'Baltimore County',
+  harford:          'Harford County',
 }
 
 function StatusCell({ item }: { item: ComplianceItem }) {
@@ -63,6 +66,9 @@ export default function Compliance({ onEditProperty }: Props) {
   const [messages, setMessages] = useState<Record<string, string>>({})
   const [updatingAll, setUpdatingAll] = useState(false)
   const [updateMsg, setUpdateMsg] = useState('')
+  const [search, setSearch] = useState('')
+  const [sortCol, setSortCol] = useState<SortCol>('name')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
   useEffect(() => { load() }, [])
 
@@ -104,6 +110,33 @@ export default function Compliance({ onEditProperty }: Props) {
     }
   }
 
+  function toggleSort(col: SortCol) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+
+  const sortArrow = (col: SortCol) => sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''
+
+  const q = search.toLowerCase()
+  const displayed = useMemo(() => {
+    const filtered = rows.filter(r =>
+      !q ||
+      r.name.toLowerCase().includes(q) ||
+      r.address.toLowerCase().includes(q) ||
+      (MUNI_LABEL[r.municipality] || r.municipality).toLowerCase().includes(q)
+    )
+    return [...filtered].sort((a, b) => {
+      let cmp = 0
+      if (sortCol === 'name') cmp = a.name.localeCompare(b.name)
+      else if (sortCol === 'municipality') cmp = a.municipality.localeCompare(b.municipality)
+      else if (sortCol === 'year_built') cmp = (a.year_built ?? 0) - (b.year_built ?? 0)
+      else if (sortCol === 'water') cmp = STATUS_ORDER[a.water.status] - STATUS_ORDER[b.water.status]
+      else if (sortCol === 'rental_license') cmp = STATUS_ORDER[a.rental_license.status] - STATUS_ORDER[b.rental_license.status]
+      else if (sortCol === 'lead') cmp = STATUS_ORDER[a.lead.status] - STATUS_ORDER[b.lead.status]
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+  }, [rows, q, sortCol, sortDir])
+
   const summary = rows.reduce((acc, r) => {
     for (const field of ['water', 'rental_license', 'lead'] as const) {
       const s = r[field].status
@@ -114,12 +147,25 @@ export default function Compliance({ onEditProperty }: Props) {
     return acc
   }, { red: 0, yellow: 0, green: 0 })
 
+  const Th = ({ col, children }: { col: SortCol; children: React.ReactNode }) => (
+    <th style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => toggleSort(col)}>
+      {children}{sortArrow(col)}
+    </th>
+  )
+
   if (loading) return <div className="card"><div className="empty">Loading…</div></div>
 
   return (
     <div>
       <div className="toolbar">
         <h1>Compliance</h1>
+        <input
+          className="filter"
+          placeholder="Search properties…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ minWidth: 200 }}
+        />
         <button className="btn btn-ghost" onClick={load}>⟳ Refresh</button>
         <button className="btn btn-primary" disabled={updatingAll} onClick={updateAllLicenses}>
           {updatingAll ? '⟳ Checking…' : 'Update All Licenses'}
@@ -146,17 +192,17 @@ export default function Compliance({ onEditProperty }: Props) {
         <table style={{ width: '100%', tableLayout: 'auto' }}>
           <thead>
             <tr>
-              <th>Property</th>
-              <th>Municipality</th>
-              <th>Year Built</th>
-              <th>Water Bills</th>
-              <th>Rental License</th>
-              <th>Lead Compliance</th>
+              <Th col="name">Property</Th>
+              <Th col="municipality">Municipality</Th>
+              <Th col="year_built">Year Built</Th>
+              <Th col="water">Water Bills</Th>
+              <Th col="rental_license">Rental License</Th>
+              <Th col="lead">Lead Compliance</Th>
               <th style={{ whiteSpace: 'nowrap' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
+            {displayed.map(r => (
               <tr key={r.id}>
                 <td>
                   <button
@@ -169,11 +215,7 @@ export default function Compliance({ onEditProperty }: Props) {
                   </button>
                   <div style={{ fontSize: 12, color: '#9ca3af', paddingLeft: 6 }}>{r.address}</div>
                 </td>
-                <td>
-                  <span className={`badge badge-${r.municipality.replace('baltimore_', '')}`}>
-                    {MUNI_LABEL[r.municipality] || r.municipality}
-                  </span>
-                </td>
+                <td style={{ fontSize: 14 }}>{MUNI_LABEL[r.municipality] || r.municipality}</td>
                 <td style={{ textAlign: 'center', fontSize: 14 }}>
                   {r.year_built ?? <span style={{ color: '#9ca3af' }}>—</span>}
                 </td>
@@ -221,6 +263,7 @@ export default function Compliance({ onEditProperty }: Props) {
             ))}
           </tbody>
         </table>
+        {displayed.length === 0 && <div className="empty">No properties match "{search}"</div>}
       </div>
     </div>
   )
