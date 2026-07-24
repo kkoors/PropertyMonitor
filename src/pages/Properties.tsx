@@ -288,7 +288,7 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
                 <tr key={p.id}>
                   <td><strong>{p.name}</strong></td>
                   <td style={{ color: '#6b7280' }}>{p.address}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}><span className={`badge badge-${p.municipality.replace('baltimore_', '')}`}>{mLabel(p.municipality)}</span></td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{mLabel(p.municipality)}</td>
                   <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{p.account_number || <span style={{ color: '#9ca3af' }}>—</span>}</td>
                   <td>{p.owner_name || <span style={{color:'#9ca3af'}}>—</span>}</td>
                   <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{p.tax_id || <span style={{color:'#9ca3af'}}>—</span>}</td>
