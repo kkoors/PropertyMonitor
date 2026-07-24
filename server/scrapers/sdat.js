@@ -165,6 +165,27 @@ const JURSCODES = {
   harford:          'HARF',
 };
 
+// Street-name spelling variants — parcel data uses apostrophes and abbreviations
+// that our stored addresses may not ("O'DONNELL" vs ODONNELL, "TULLEY'S" vs
+// TULLEYS, "ST" vs SAINT).
+function nameVariants(nameOnly) {
+  const name = nameOnly.toUpperCase();
+  const out = new Set([name]);
+
+  // ODONNELL → O'DONNELL (leading O + consonant run)
+  out.add(name.replace(/\bO([A-Z]{3,})/g, "O'$1"));
+  // TULLEYS → TULLEY'S (possessive on any word ending in S)
+  out.add(name.replace(/\b([A-Z]{3,})S\b/g, "$1'S"));
+  // SAINT ↔ ST
+  if (/\bSAINT\b/.test(name)) out.add(name.replace(/\bSAINT\b/g, 'ST'));
+  if (/\bST\b/.test(name)) out.add(name.replace(/\bST\b/g, 'SAINT'));
+  // Last resort: prefix of the first word, trailing S dropped (matches both spellings)
+  const first = name.split(' ')[0].replace(/S$/, '');
+  if (first.length >= 4) out.add(first);
+
+  return [...out];
+}
+
 async function lookupSdatMailing(property) {
   const jurs = JURSCODES[property.municipality];
   if (!jurs) return { error: `No jurisdiction code for: ${property.municipality}` };
@@ -172,23 +193,28 @@ async function lookupSdatMailing(property) {
   const parsed = parseAddress(property.address);
   if (!parsed) return { error: `Could not parse address: ${property.address}` };
 
-  const streetName = parsed.nameOnly.replace(/'/g, "''").toUpperCase();
-  const where = `JURSCODE='${jurs}' AND PREMSNUM='${parsed.number}' AND UPPER(PREMSNAM) LIKE '${streetName}%'`;
-  const params = new URLSearchParams({
-    where,
-    outFields: 'ACCTID,OWNADD1,OWNADD2,OWNCITY,OWNSTATE,OWNERZIP,ADDRESS,PREMSNAM',
-    f: 'json',
-    resultRecordCount: '5',
-  });
-
   try {
-    const res = await fetch(`${MD_PARCELS}?${params}`, { signal: AbortSignal.timeout(15000) });
-    if (!res.ok) return { error: `MD parcel service HTTP ${res.status}` };
-    const data = await res.json();
-    if (data.error) return { error: `MD parcel service: ${data.error.message}` };
+    let features = [];
+    for (const variant of nameVariants(parsed.nameOnly)) {
+      const streetName = variant.replace(/'/g, "''");
+      const where = `JURSCODE='${jurs}' AND PREMSNUM='${parsed.number}' AND UPPER(PREMSNAM) LIKE '${streetName}%'`;
+      const params = new URLSearchParams({
+        where,
+        outFields: 'ACCTID,OWNADD1,OWNADD2,OWNCITY,OWNSTATE,OWNERZIP,ADDRESS,PREMSNAM',
+        f: 'json',
+        resultRecordCount: '5',
+      });
 
-    const features = data.features || [];
-    console.log(`[sdat-mailing] ${features.length} parcels for ${jurs} ${parsed.number} ${streetName}%`);
+      const res = await fetch(`${MD_PARCELS}?${params}`, { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.error) { console.log(`[sdat-mailing] '${variant}': ${data.error.message}`); continue; }
+
+      features = data.features || [];
+      console.log(`[sdat-mailing] ${jurs} ${parsed.number} '${variant}%': ${features.length} parcels`);
+      if (features.length > 0) break;
+    }
+
     if (features.length === 0) {
       return { error: 'SDAT mailing lookup: address not found in MD parcel data.' };
     }
