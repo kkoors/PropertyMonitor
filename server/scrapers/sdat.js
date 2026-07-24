@@ -105,22 +105,37 @@ async function lookupBaltimoreCounty(parsed) {
 }
 
 // ── Harford County ──────────────────────────────────────────────────────────
-async function lookupHarford(parsed, countyCode) {
-  // Try Maryland Open Data for Harford assessment records
-  try {
-    const catalog = await fetch(
-      `https://data.maryland.gov/api/catalog/v1?q=harford+real+property&limit=5`,
-      { signal: AbortSignal.timeout(10000) }
-    );
-    if (catalog.ok) {
-      const cat = await catalog.json();
-      console.log('[sdat-harford] MD catalog:', (cat.results || []).map(d => `${d.resource?.id} — ${d.resource?.name}`).join('\n  '));
-    }
-  } catch (err) {
-    console.log('[sdat-harford] catalog error:', err.message);
-  }
+// Harford County GIS Cadastral layer: P_ST_NO (Double), P_ST_NAME, YR_BUILT
+const HC_CADASTRAL = 'https://hcggis.harfordcountymd.gov/public/rest/services/Planning/Cadastral/MapServer/0/query';
 
-  return { error: 'Harford County year-built lookup not yet available. Enter year built manually in Properties.' };
+async function lookupHarford(parsed) {
+  const streetName = parsed.nameOnly.replace(/'/g, "''").toUpperCase();
+  const where = `P_ST_NO=${parsed.number} AND UPPER(P_ST_NAME) LIKE '${streetName}%'`;
+  const params = new URLSearchParams({ where, outFields: 'P_ST_NO,P_ST_NAME,YR_BUILT,FEATURE', f: 'json', resultRecordCount: '5' });
+
+  try {
+    const res = await fetch(`${HC_CADASTRAL}?${params}`, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return { error: `Harford Cadastral HTTP ${res.status}` };
+    const data = await res.json();
+    if (data.error) return { error: `Harford Cadastral: ${data.error.message}` };
+
+    const features = data.features || [];
+    console.log(`[sdat-harford] Cadastral: ${features.length} features for P_ST_NO=${parsed.number} P_ST_NAME like '${streetName}%'`);
+    if (features.length === 0) {
+      return { error: 'Harford County year-built: address not found in Cadastral layer. Enter year built manually.' };
+    }
+
+    const f = features[0].attributes;
+    const yearBuilt = f.YR_BUILT ? Number(f.YR_BUILT) : null;
+    if (!yearBuilt || isNaN(yearBuilt) || yearBuilt < 1700 || yearBuilt > 2030) {
+      return { error: 'Harford County year-built: no year built value in Cadastral record. Enter manually.' };
+    }
+
+    console.log(`[sdat-harford] Found YR_BUILT=${yearBuilt} FEATURE=${f.FEATURE}`);
+    return { year_built: yearBuilt, sdat_acct: f.FEATURE || null };
+  } catch (err) {
+    return { error: `Harford Cadastral error: ${err.message}` };
+  }
 }
 
 module.exports = { lookupSdat };
