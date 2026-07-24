@@ -1,5 +1,5 @@
 'use strict';
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+// env vars come from PM2 ecosystem.config.js + pm2 env set for secrets
 const express = require('express');
 const { sessionMiddleware, requireAuth, authRoutes } = require('./auth');
 const path = require('path');
