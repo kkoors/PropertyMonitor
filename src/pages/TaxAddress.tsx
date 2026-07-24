@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTableSort } from '../useTableSort'
 
 const FLAG_BG: Record<string, string> = { green: '#dcfce7', yellow: '#fef9c3', red: '#fee2e2', unknown: '#f3f4f6' }
 const FLAG_TEXT: Record<string, string> = { green: '#166534', yellow: '#854d0e', red: '#991b1b', unknown: '#6b7280' }
@@ -8,6 +9,7 @@ export default function TaxAddress() {
   const [checking, setChecking] = useState<number | null>(null)
   const [checkingAll, setCheckingAll] = useState(false)
   const [error, setError] = useState('')
+  const { search, setSearch, Th, apply } = useTableSort('taxaddr', 'name')
 
   useEffect(() => { load() }, [])
 
@@ -37,6 +39,7 @@ export default function TaxAddress() {
     <div>
       <div className="toolbar">
         <h1>Tax Mailing Address (SDAT)</h1>
+        <input className="filter" style={{ minWidth: 180 }} placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
         <button className="btn btn-primary" onClick={checkAll} disabled={checkingAll}>
           {checkingAll ? 'Checking…' : '⟳ Check All'}
         </button>
@@ -49,11 +52,16 @@ export default function TaxAddress() {
         <table style={{ width: '100%' }}>
           <thead>
             <tr>
-              <th>Property</th><th>Tax ID</th><th>Owner Address (on file)</th><th>SDAT Mailing Address</th><th>Status</th><th>Checked</th><th>Actions</th>
+              <Th col="name">Property</Th><Th col="tax_id">Tax ID</Th><th>Owner Address (on file)</th><th>SDAT Mailing Address</th><Th col="flagStatus">Status</Th><Th col="sdat_checked_at">Checked</Th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
+            {apply(
+              rows,
+              r => [r.name, r.address, r.tax_id, r.owner_address, r.sdat_mailing_address, r.flag?.label],
+              new Set(),
+              (r, col) => col === 'flagStatus' ? r.flag?.status : r[col],
+            ).map(r => (
               <tr key={r.id}>
                 <td><strong>{r.name}</strong><div style={{ fontSize: 12, color: '#6b7280' }}>{r.address}</div></td>
                 <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{r.tax_id || <span style={{color:'#9ca3af'}}>—</span>}</td>

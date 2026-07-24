@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTableSort } from '../useTableSort'
 
 const STATUS_BG: Record<string, string> = {
   active: '#dcfce7', expired: '#fee2e2', pending: '#fef9c3', cancelled: '#fee2e2', not_found: '#fee2e2', unknown: '#f3f4f6',
@@ -12,6 +13,7 @@ export default function Licensing() {
   const [checking, setChecking] = useState<number | null>(null)
   const [checkingAll, setCheckingAll] = useState(false)
   const [error, setError] = useState('')
+  const { search, setSearch, Th, apply } = useTableSort('licensing', 'name')
 
   useEffect(() => { load() }, [])
 
@@ -38,12 +40,16 @@ export default function Licensing() {
     } finally { setCheckingAll(false) }
   }
 
-  const monitored = rows.filter(r => !r.commercial && !r.license_not_monitored && (r.municipality === 'baltimore_city' || r.municipality === 'baltimore_county'))
+  const monitored = apply(
+    rows.filter(r => !r.commercial && !r.license_not_monitored && (r.municipality === 'baltimore_city' || r.municipality === 'baltimore_county')),
+    r => [r.name, r.address, r.municipality, r.license_number, r.status],
+  )
 
   return (
     <div>
       <div className="toolbar">
         <h1>Rental Licensing</h1>
+        <input className="filter" style={{ minWidth: 180 }} placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
         <button className="btn btn-primary" onClick={checkAll} disabled={checkingAll}>
           {checkingAll ? 'Checking…' : '⟳ Check All'}
         </button>
@@ -53,8 +59,8 @@ export default function Licensing() {
         <table style={{ width: '100%' }}>
           <thead>
             <tr>
-              <th>Property</th><th>Address</th><th>Municipality</th>
-              <th>License #</th><th>Status</th><th>Issued</th><th>Expires</th><th>Letter</th><th>Last Checked</th><th>Actions</th>
+              <Th col="name">Property</Th><th>Address</th><Th col="municipality">Municipality</Th>
+              <Th col="license_number">License #</Th><Th col="status">Status</Th><Th col="issue_date">Issued</Th><Th col="exp_date">Expires</Th><th>Letter</th><Th col="scraped_at">Last Checked</Th><th>Actions</th>
             </tr>
           </thead>
           <tbody>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTableSort } from '../useTableSort'
 
 const currentYear = new Date().getFullYear()
 
@@ -17,6 +18,7 @@ export default function LeadRegistry() {
   const [checkingAll, setCheckingAll] = useState(false)
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
+  const { search, setSearch, Th, apply } = useTableSort('leadreg', 'name')
 
   useEffect(() => { load() }, [])
 
@@ -34,7 +36,11 @@ export default function LeadRegistry() {
     } finally { setChecking(null) }
   }
 
-  const monitored = rows.filter(r => !r.commercial && !r.lead_not_monitored && (!r.year_built || r.year_built < 1978))
+  const monitored = apply(
+    rows.filter(r => !r.commercial && !r.lead_not_monitored && (!r.year_built || r.year_built < 1978)),
+    r => [r.name, r.address, r.tracking_id, r.registry_owner, r.registry_owner_address, r.cert_number, r.cert_status],
+    new Set(['payment_year']),
+  )
 
   async function checkAll() {
     setCheckingAll(true); setError('')
@@ -62,6 +68,7 @@ export default function LeadRegistry() {
     <div>
       <div className="toolbar">
         <h1>Lead Registry (MDE)</h1>
+        <input className="filter" style={{ minWidth: 180 }} placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
         <button className="btn btn-primary" onClick={checkAll} disabled={checkingAll}>
           {checkingAll ? `Checking ${progress}…` : '⟳ Check All'}
         </button>
@@ -71,8 +78,8 @@ export default function LeadRegistry() {
         <table style={{ width: '100%' }}>
           <thead>
             <tr>
-              <th>Property</th><th>Tracking ID</th><th>Registry Owner</th><th>Registry Owner Address</th>
-              <th>Registered</th><th>Bank Date</th><th>Paid Thru</th><th>Cert</th><th>Units</th><th>Actions</th>
+              <Th col="name">Property</Th><Th col="tracking_id">Tracking ID</Th><Th col="registry_owner">Registry Owner</Th><th>Registry Owner Address</th>
+              <Th col="registration_date">Registered</Th><Th col="bank_date">Bank Date</Th><Th col="payment_year">Paid Thru</Th><Th col="cert_status">Cert</Th><th>Units</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
