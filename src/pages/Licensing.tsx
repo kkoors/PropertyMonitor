@@ -8,7 +8,7 @@ const STATUS_TEXT: Record<string, string> = {
   active: '#166534', expired: '#991b1b', pending: '#854d0e', cancelled: '#991b1b', not_found: '#991b1b', unknown: '#6b7280',
 }
 
-export default function Licensing() {
+export default function Licensing({ onEditProperty }: { onEditProperty?: (id: number) => void }) {
   const [rows, setRows] = useState<any[]>([])
   const [checking, setChecking] = useState<number | null>(null)
   const [checkingAll, setCheckingAll] = useState(false)
@@ -66,8 +66,12 @@ export default function Licensing() {
           <tbody>
             {monitored.map(r => (
               <tr key={r.id}>
-                <td><strong>{r.name}</strong></td>
-                <td style={{ color: '#6b7280' }}>{r.address}</td>
+                <td>
+                  <button className="btn btn-ghost btn-sm" style={{ fontWeight: 700, fontSize: 14, padding: '2px 6px', textAlign: 'left' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">
+                    {r.name}
+                  </button>
+                </td>
+                <td style={{ color: '#6b7280', cursor: 'pointer' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">{r.address}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>{r.municipality === 'baltimore_city' ? 'Baltimore City' : 'Baltimore County'}</td>
                 <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{r.license_number || <span style={{color:'#9ca3af'}}>—</span>}</td>
                 <td style={{ background: STATUS_BG[r.status] || '#f3f4f6', color: STATUS_TEXT[r.status] || '#6b7280', fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>

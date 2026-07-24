@@ -2,23 +2,39 @@
 
 const BASE = 'https://bcgisapps.baltimorecountymd.gov/arcgis/rest/services/RentalLicense/MapServer/0/query';
 
+const DIRECTIONS = new Set(['N', 'S', 'E', 'W', 'NORTH', 'SOUTH', 'EAST', 'WEST', 'NE', 'NW', 'SE', 'SW']);
+const SUFFIXES = new Set([
+  'ST', 'STREET', 'AVE', 'AVENUE', 'AV', 'RD', 'ROAD', 'DR', 'DRIVE', 'LN', 'LANE',
+  'CT', 'COURT', 'PL', 'PLACE', 'WAY', 'BLVD', 'BOULEVARD', 'CIR', 'CIRCLE',
+  'TER', 'TERRACE', 'TRL', 'TRAIL', 'PKWY', 'PARKWAY', 'SQ', 'SQUARE',
+  'HWY', 'HIGHWAY', 'ALY', 'ALLEY', 'GARTH', 'MEWS', 'RUN', 'WALK',
+]);
+
 function parseAddress(address) {
-  const street = address.split(',')[0].trim();
-  const match = street.match(/^(\d+)\s+(.+)$/);
+  const street = address.split(',')[0].trim().toUpperCase().replace(/[.#]/g, ' ').replace(/\s+/g, ' ').trim();
+  const match = street.match(/^(\d+)[A-Z]?\s+(.+)$/);
   if (!match) return null;
-  const parts = match[2].trim().split(/\s+/);
-  const suffixes = new Set(['ST', 'AVE', 'DR', 'RD', 'LN', 'CT', 'PL', 'WAY', 'BLVD', 'CIR', 'TER', 'TRL', 'PKWY', 'SQ', 'HWY']);
-  const last = parts[parts.length - 1].toUpperCase();
-  const suffix = suffixes.has(last) ? last : '';
-  const name = suffix ? parts.slice(0, -1).join(' ') : parts.join(' ');
-  return { number: match[1], name: name.toUpperCase(), suffix };
+  let parts = match[2].split(' ');
+
+  const aptIdx = parts.findIndex(t => ['APT', 'UNIT', 'STE', 'SUITE', 'FL', 'FLOOR', 'REAR'].includes(t));
+  if (aptIdx >= 0) parts = parts.slice(0, aptIdx);
+
+  let dir = '';
+  if (parts.length > 1 && DIRECTIONS.has(parts[0])) dir = parts.shift();
+
+  let suffix = '';
+  if (parts.length > 1 && SUFFIXES.has(parts[parts.length - 1])) suffix = parts.pop();
+
+  const name = parts.join(' ');
+  if (!name) return null;
+  return { number: match[1], name, dir, suffix };
 }
 
 async function scrapeRentalLicenseBaltimoreCounty(property) {
   const parsed = parseAddress(property.address);
   if (!parsed) return { error: `Could not parse address: ${property.address}` };
 
-  const where = `B1_HSE_NBR_START=${parsed.number} AND UPPER(B1_STR_NAME) LIKE '${parsed.name.replace(/'/g, "''")}'`;
+  const where = `B1_HSE_NBR_START=${parsed.number} AND UPPER(B1_STR_NAME) LIKE '${parsed.name.replace(/'/g, "''")}%'`;
   const params = new URLSearchParams({
     where,
     outFields: '*',

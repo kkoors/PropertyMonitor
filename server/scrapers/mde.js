@@ -13,16 +13,35 @@ const LRCA_COUNTY = {
   harford:          '261',
 };
 
+const DIRECTIONS = new Set(['N', 'S', 'E', 'W', 'NORTH', 'SOUTH', 'EAST', 'WEST', 'NE', 'NW', 'SE', 'SW']);
+const SUFFIXES = new Set([
+  'ST', 'STREET', 'AVE', 'AVENUE', 'AV', 'RD', 'ROAD', 'DR', 'DRIVE', 'LN', 'LANE',
+  'CT', 'COURT', 'PL', 'PLACE', 'WAY', 'BLVD', 'BOULEVARD', 'CIR', 'CIRCLE',
+  'TER', 'TERRACE', 'TRL', 'TRAIL', 'PKWY', 'PARKWAY', 'SQ', 'SQUARE',
+  'HWY', 'HIGHWAY', 'ALY', 'ALLEY', 'GARTH', 'MEWS', 'RUN', 'WALK',
+]);
+
 function parseAddress(address) {
-  const street = address.split(',')[0].trim();
-  const match = street.match(/^(\d+)\s+(.+)$/);
+  let street = address.split(',')[0].trim().toUpperCase().replace(/[.#]/g, ' ').replace(/\s+/g, ' ').trim();
+  const match = street.match(/^(\d+)[A-Z]?\s+(.+)$/);
   if (!match) return null;
-  const parts = match[2].trim().split(/\s+/);
-  const suffixes = new Set(['ST', 'AVE', 'DR', 'RD', 'LN', 'CT', 'PL', 'WAY', 'BLVD', 'CIR', 'TER', 'PKWY', 'SQ', 'HWY']);
-  const last = parts[parts.length - 1].toUpperCase();
-  const suffix = suffixes.has(last) ? last : '';
-  const name = suffix ? parts.slice(0, -1).join(' ') : parts.join(' ');
-  return { number: match[1], name: name.toUpperCase(), suffix };
+  let parts = match[2].split(' ');
+
+  // Drop unit designators and anything after them ("APT 2", "UNIT B")
+  const aptIdx = parts.findIndex(t => ['APT', 'UNIT', 'STE', 'SUITE', 'FL', 'FLOOR', 'REAR'].includes(t));
+  if (aptIdx >= 0) parts = parts.slice(0, aptIdx);
+
+  // Directional prefix is a separate field on MDE/GIS — strip it from the name
+  let dir = '';
+  if (parts.length > 1 && DIRECTIONS.has(parts[0])) dir = parts.shift();
+
+  // Strip street-type suffix (abbreviated or spelled out)
+  let suffix = '';
+  if (parts.length > 1 && SUFFIXES.has(parts[parts.length - 1])) suffix = parts.pop();
+
+  const name = parts.join(' ');
+  if (!name) return null;
+  return { number: match[1], name, dir, suffix };
 }
 
 async function scrapeMdeRegistration(property) {
@@ -45,6 +64,10 @@ async function scrapeMdeRegistration(property) {
 
     await page.fill('#ucpublicSearch1_txtAddressNo', parsed.number);
     await page.fill('#ucpublicSearch1_txtStreetName', parsed.name);
+    if (parsed.dir) {
+      const d = parsed.dir[0]; // dropdown uses single letters E/W/N/S
+      await page.selectOption('#ucpublicSearch1_ddlAddresPrefix', d).catch(() => {});
+    }
     await page.selectOption('#ucpublicSearch1_ddlCounty', countyVal);
     await page.click('#ucpublicSearch1_btnPublicSearch');
 

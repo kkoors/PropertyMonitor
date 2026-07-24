@@ -55,9 +55,9 @@ export default function App() {
       </nav>
       <main className="main">
         {page === 'compliance'  && <Compliance onEditProperty={goEditProperty} />}
-        {page === 'licensing'   && <Licensing />}
-        {page === 'lead'        && <LeadRegistry />}
-        {page === 'taxaddress'  && <TaxAddress />}
+        {page === 'licensing'   && <Licensing onEditProperty={goEditProperty} />}
+        {page === 'lead'        && <LeadRegistry onEditProperty={goEditProperty} />}
+        {page === 'taxaddress'  && <TaxAddress onEditProperty={goEditProperty} />}
         {page === 'properties'  && <Properties editPropertyId={editPropertyId} onClearEditId={clearEditProperty} />}
         {page === 'lookup'      && <AddressLookup onAddProperties={() => setPage('properties')} />}
         {page === 'dashboard'   && <Dashboard onNavigate={p => setPage(p as Page)} />}

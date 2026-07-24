@@ -4,7 +4,7 @@ import { useTableSort } from '../useTableSort'
 const FLAG_BG: Record<string, string> = { green: '#dcfce7', yellow: '#fef9c3', red: '#fee2e2', unknown: '#f3f4f6' }
 const FLAG_TEXT: Record<string, string> = { green: '#166534', yellow: '#854d0e', red: '#991b1b', unknown: '#6b7280' }
 
-export default function TaxAddress() {
+export default function TaxAddress({ onEditProperty }: { onEditProperty?: (id: number) => void }) {
   const [rows, setRows] = useState<any[]>([])
   const [checking, setChecking] = useState<number | null>(null)
   const [checkingAll, setCheckingAll] = useState(false)
@@ -63,7 +63,12 @@ export default function TaxAddress() {
               (r, col) => col === 'flagStatus' ? r.flag?.status : r[col],
             ).map(r => (
               <tr key={r.id}>
-                <td><strong>{r.name}</strong><div style={{ fontSize: 12, color: '#6b7280' }}>{r.address}</div></td>
+                <td>
+                  <button className="btn btn-ghost btn-sm" style={{ fontWeight: 700, fontSize: 14, padding: '2px 6px', textAlign: 'left' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">
+                    {r.name}
+                  </button>
+                  <div style={{ fontSize: 12, color: '#6b7280', paddingLeft: 6, cursor: 'pointer' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">{r.address}</div>
+                </td>
                 <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{r.tax_id || <span style={{color:'#9ca3af'}}>—</span>}</td>
                 <td style={{ fontSize: 13 }}>{r.owner_address || <span style={{color:'#9ca3af'}}>none on file</span>}</td>
                 <td style={{ fontSize: 13 }}>{r.sdat_mailing_address || <span style={{color:'#9ca3af'}}>—</span>}</td>

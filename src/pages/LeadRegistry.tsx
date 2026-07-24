@@ -12,7 +12,7 @@ function MatchBadge({ ok, label }: { ok: boolean | null; label: string }) {
   )
 }
 
-export default function LeadRegistry() {
+export default function LeadRegistry({ onEditProperty }: { onEditProperty?: (id: number) => void }) {
   const [rows, setRows] = useState<any[]>([])
   const [checking, setChecking] = useState<number | null>(null)
   const [checkingAll, setCheckingAll] = useState(false)
@@ -87,7 +87,12 @@ export default function LeadRegistry() {
               const payOk = r.payment_year && Number(r.payment_year) >= currentYear
               return (
                 <tr key={r.id}>
-                  <td><strong>{r.name}</strong><div style={{ fontSize: 12, color: '#6b7280' }}>{r.address}</div></td>
+                  <td>
+                    <button className="btn btn-ghost btn-sm" style={{ fontWeight: 700, fontSize: 14, padding: '2px 6px', textAlign: 'left' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">
+                      {r.name}
+                    </button>
+                    <div style={{ fontSize: 12, color: '#6b7280', paddingLeft: 6, cursor: 'pointer' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">{r.address}</div>
+                  </td>
                   <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{r.tracking_id || <span style={{color:'#9ca3af'}}>—</span>}</td>
                   <td>
                     {r.registry_owner || <span style={{color:'#9ca3af'}}>—</span>}

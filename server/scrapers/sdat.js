@@ -9,13 +9,32 @@ const COUNTY_CODES = {
   harford:          '13',
 };
 
+const SDAT_DIRECTIONS = new Set(['N', 'S', 'E', 'W', 'NORTH', 'SOUTH', 'EAST', 'WEST', 'NE', 'NW', 'SE', 'SW']);
+const SDAT_SUFFIXES = new Set([
+  'ST', 'STREET', 'AVE', 'AVENUE', 'AV', 'RD', 'ROAD', 'DR', 'DRIVE', 'LN', 'LANE',
+  'CT', 'COURT', 'PL', 'PLACE', 'WAY', 'BLVD', 'BOULEVARD', 'CIR', 'CIRCLE',
+  'TER', 'TERRACE', 'TRL', 'TRAIL', 'PKWY', 'PARKWAY', 'SQ', 'SQUARE',
+  'HWY', 'HIGHWAY', 'ALY', 'ALLEY', 'GARTH', 'MEWS', 'RUN', 'WALK', 'RTE', 'RT',
+]);
+
 function parseAddress(address) {
-  const street = address.split(',')[0].trim();
-  const match = street.match(/^(\d+)\s+(.+)$/);
+  const street = address.split(',')[0].trim().toUpperCase().replace(/[.#]/g, ' ').replace(/\s+/g, ' ').trim();
+  const match = street.match(/^(\d+)[A-Z]?\s+(.+)$/);
   if (!match) return null;
-  const full = match[2].trim();
-  const nameOnly = full.replace(/\s+(ST|AVE|DR|RD|LN|CT|PL|WAY|BLVD|CIR|TER|TRL|PKWY|SQ|SQUARE|HWY|RTE|RT)\s*$/i, '').trim();
-  return { number: match[1], name: full, nameOnly };
+  let parts = match[2].split(' ');
+
+  const aptIdx = parts.findIndex(t => ['APT', 'UNIT', 'STE', 'SUITE', 'FL', 'FLOOR', 'REAR'].includes(t));
+  if (aptIdx >= 0) parts = parts.slice(0, aptIdx);
+
+  let dir = '';
+  if (parts.length > 1 && SDAT_DIRECTIONS.has(parts[0])) dir = parts.shift();
+
+  let suffix = '';
+  if (parts.length > 1 && SDAT_SUFFIXES.has(parts[parts.length - 1])) suffix = parts.pop();
+
+  const nameOnly = parts.join(' ');
+  if (!nameOnly) return null;
+  return { number: match[1], name: match[2], nameOnly, dir, suffix };
 }
 
 async function lookupSdat(property) {
