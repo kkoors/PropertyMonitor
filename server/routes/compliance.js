@@ -3,9 +3,16 @@ const { Router } = require('express');
 const { lookupSdat } = require('../scrapers/sdat');
 const { scrapeRentalLicenseBaltimoreCounty } = require('../scrapers/rentalLicenseBaltimoreCounty');
 const { scrapeRentalLicenseBaltimoreCity } = require('../scrapers/rentalLicenseBaltimoreCity');
-const { scrapeMdeRegistration } = require('../scrapers/mde');
+const { scrapeMdeRegistration, scrapeMdeCertificate } = require('../scrapers/mde');
 
 const DAYS = ms => Math.round(ms / 86400000);
+
+function normalizeUsDate(val) {
+  if (!val) return null;
+  const m = val.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (!m) return val;
+  return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+}
 
 function billStatus(property) {
   if (property.private_ws) return { status: 'na', label: 'Private W/S' };
@@ -56,6 +63,11 @@ function leadStatus(property, leadRecords) {
     if (daysLeft < 60) return { status: 'yellow', label: `Cert exp in ${daysLeft}d` };
     return { status: 'green', label: `Cert exp ${exp}` };
   }
+  const registered = latest.registration_status && latest.registration_status !== 'not_found';
+  const certPassed = (latest.cert_status || '').toUpperCase().includes('PASS');
+  if (registered && certPassed) return { status: 'green', label: `Registered · Cert ${latest.cert_number} passed` };
+  if (registered) return { status: 'yellow', label: `Registered ${latest.registration_date || ''} · no cert`.trim() };
+  if (certPassed) return { status: 'yellow', label: `Cert ${latest.cert_number} passed · not registered` };
   if (latest.inspection_date) return { status: 'green', label: `Inspected ${latest.inspection_date}` };
   return { status: 'yellow', label: 'Lead record on file' };
 }
@@ -191,14 +203,46 @@ module.exports = function makeComplianceRouter(db) {
     res.json({ updated: results.length, results });
   });
 
-  // Trigger MDE lead registration check
+  // Trigger MDE lead registration + certificate check, persist to lead_records
   router.post('/mde/:propertyId', async (req, res) => {
     const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);
     if (!property) return res.status(404).json({ error: 'Not found' });
 
-    const result = await scrapeMdeRegistration(property);
-    if (result.error) return res.status(422).json({ error: result.error });
-    res.json(result);
+    const reg = await scrapeMdeRegistration(property);
+    const cert = await scrapeMdeCertificate(property);
+
+    if (reg.error && cert.error) {
+      return res.status(422).json({ error: `Registration: ${reg.error} / Certificate: ${cert.error}` });
+    }
+
+    const registered = !reg.error && reg.registered;
+    const certFound = !cert.error && cert.cert_found;
+
+    if (registered || certFound) {
+      const notes = [
+        registered ? `MDE registered${reg.owner_name ? ' — ' + reg.owner_name.split('\n')[0] : ''}` : 'Not in MDE registry',
+        certFound ? `Cert ${cert.cert_number || ''} ${cert.cert_status || ''}`.trim() : 'No inspection certificate',
+      ].join('; ');
+
+      const existing = db.prepare(`SELECT id FROM lead_records WHERE property_id = ? AND source = 'mde'`).get(property.id);
+      const vals = {
+        tracking_id: registered ? reg.tracking_id : null,
+        registration_date: registered ? normalizeUsDate(reg.registration_date) : null,
+        registration_status: registered ? reg.status : 'not_found',
+        cert_number: certFound ? cert.cert_number : null,
+        cert_status: certFound ? cert.cert_status : null,
+        inspection_date: certFound ? normalizeUsDate(cert.inspection_date) : null,
+      };
+      if (existing) {
+        db.prepare(`UPDATE lead_records SET tracking_id=?, registration_date=?, registration_status=?, cert_number=?, cert_status=?, inspection_date=?, notes=? WHERE id=?`)
+          .run(vals.tracking_id, vals.registration_date, vals.registration_status, vals.cert_number, vals.cert_status, vals.inspection_date, notes, existing.id);
+      } else {
+        db.prepare(`INSERT INTO lead_records (property_id, tracking_id, registration_date, registration_status, cert_number, cert_status, inspection_date, notes, source) VALUES (?,?,?,?,?,?,?,?,'mde')`)
+          .run(property.id, vals.tracking_id, vals.registration_date, vals.registration_status, vals.cert_number, vals.cert_status, vals.inspection_date, notes);
+      }
+    }
+
+    res.json({ registration: reg, certificate: cert, saved: registered || certFound });
   });
 
   return router;

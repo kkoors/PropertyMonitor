@@ -148,6 +148,13 @@ function initSchema(db) {
     db.prepare(`ALTER TABLE rental_licenses ADD COLUMN confirmation_letter BLOB`).run();
   }
 
+  const leadCols = db.prepare(`PRAGMA table_info(lead_records)`).all().map(c => c.name);
+  if (!leadCols.includes('tracking_id')) db.prepare(`ALTER TABLE lead_records ADD COLUMN tracking_id TEXT`).run();
+  if (!leadCols.includes('registration_date')) db.prepare(`ALTER TABLE lead_records ADD COLUMN registration_date TEXT`).run();
+  if (!leadCols.includes('registration_status')) db.prepare(`ALTER TABLE lead_records ADD COLUMN registration_status TEXT`).run();
+  if (!leadCols.includes('cert_status')) db.prepare(`ALTER TABLE lead_records ADD COLUMN cert_status TEXT`).run();
+  if (!leadCols.includes('source')) db.prepare(`ALTER TABLE lead_records ADD COLUMN source TEXT`).run();
+
   // Migrations for existing databases
   const billCols = db._db.exec(`PRAGMA table_info(bills)`)[0]?.values.map(r => r[1]) || [];
   if (!billCols.includes('current_balance')) db.exec(`ALTER TABLE bills ADD COLUMN current_balance REAL`);
