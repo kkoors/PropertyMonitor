@@ -137,8 +137,8 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
     })
 
   const Th = ({ col, children }: { col: typeof sortCol; children: React.ReactNode }) => (
-    <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(col)}>
-      {children}{sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+    <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(col)} title="Click to sort">
+      {children}{sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : <span style={{ opacity: 0.35 }}> ↕</span>}
     </th>
   )
 

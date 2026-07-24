@@ -150,8 +150,8 @@ export default function Compliance({ onEditProperty }: Props) {
   }, { red: 0, yellow: 0, green: 0 })
 
   const Th = ({ col, children }: { col: SortCol; children: React.ReactNode }) => (
-    <th style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => toggleSort(col)}>
-      {children}{sortArrow(col)}
+    <th style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => toggleSort(col)} title="Click to sort">
+      {children}{sortArrow(col) || <span style={{ opacity: 0.35 }}> ↕</span>}
     </th>
   )
 

@@ -16,6 +16,7 @@ export default function LeadRegistry({ onEditProperty }: { onEditProperty?: (id:
   const [rows, setRows] = useState<any[]>([])
   const [checking, setChecking] = useState<number | null>(null)
   const [checkingAll, setCheckingAll] = useState(false)
+  const [showHidden, setShowHidden] = useState(false)
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
   const { search, setSearch, Th, apply } = useTableSort('leadreg', 'name')
@@ -25,6 +26,15 @@ export default function LeadRegistry({ onEditProperty }: { onEditProperty?: (id:
   async function load() {
     const data = await fetch('/api/compliance/lead-registry').then(r => r.json())
     setRows(data)
+  }
+
+  async function toggleHide(r: any, unit: string, hidden: boolean) {
+    await fetch(`/api/compliance/lead-unit-hide/${r.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unit, hidden }),
+    })
+    await load()
   }
 
   async function check(r: any) {
@@ -69,6 +79,9 @@ export default function LeadRegistry({ onEditProperty }: { onEditProperty?: (id:
       <div className="toolbar">
         <h1>Lead Registry (MDE)</h1>
         <input className="filter" style={{ minWidth: 180 }} placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
+        <button className={`btn btn-sm ${showHidden ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setShowHidden(s => !s)}>
+          {showHidden ? 'Hide hidden units' : 'Show hidden units'}
+        </button>
         <button className="btn btn-primary" onClick={checkAll} disabled={checkingAll}>
           {checkingAll ? `Checking ${progress}…` : '⟳ Check All'}
         </button>
@@ -87,9 +100,10 @@ export default function LeadRegistry({ onEditProperty }: { onEditProperty?: (id:
             {monitored.flatMap(r => {
               const payOk = r.payment_year && Number(r.payment_year) >= currentYear
               // Multifamily with unit certs → one row per unit; otherwise a single row from the property-level cert
-              const units: any[] = (r.multifamily && r.units.length > 0)
-                ? r.units
-                : [{ unit: r.multifamily ? '?' : '', cert_number: r.cert_number, cert_status: r.cert_status, inspection_date: r.inspection_date }]
+              const visibleUnits = showHidden ? r.units : r.units.filter((u: any) => !u.hidden)
+              const units: any[] = (r.multifamily && visibleUnits.length > 0)
+                ? visibleUnits
+                : [{ unit: r.multifamily ? '?' : '', cert_number: r.cert_number, cert_status: r.cert_status, inspection_date: r.inspection_date, nohide: true }]
               const span = units.length
               return units.map((u: any, i: number) => (
                 <tr key={`${r.id}-${u.unit ?? i}`}>
@@ -119,13 +133,25 @@ export default function LeadRegistry({ onEditProperty }: { onEditProperty?: (id:
                       {r.payment_year || '—'}
                     </td>
                   </>)}
-                  <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{r.multifamily ? (u.unit || '?') : <span style={{color:'#9ca3af'}}>—</span>}</td>
-                  <td style={{ whiteSpace: 'nowrap', fontSize: 13 }}>
+                  <td style={{ fontWeight: 700, whiteSpace: 'nowrap', opacity: u.hidden ? 0.45 : 1 }}>
+                    {r.multifamily ? (u.unit || '?') : <span style={{color:'#9ca3af'}}>—</span>}
+                    {r.multifamily && !u.nohide && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ marginLeft: 6, padding: '0 5px', fontSize: 11 }}
+                        title={u.hidden ? 'Unhide this unit' : 'Hide this unit (stale MDE entry)'}
+                        onClick={() => toggleHide(r, u.unit || '', !u.hidden)}
+                      >
+                        {u.hidden ? '👁 unhide' : '🚫'}
+                      </button>
+                    )}
+                  </td>
+                  <td style={{ whiteSpace: 'nowrap', fontSize: 13, opacity: u.hidden ? 0.45 : 1 }}>
                     {u.cert_number
                       ? <span style={{ color: (u.cert_status || '').includes('PASS') ? '#166534' : '#991b1b', fontWeight: 600 }}>{u.cert_number} {u.cert_status}</span>
                       : <span style={{color:'#9ca3af'}}>{r.multifamily ? 'no cert' : '—'}</span>}
                   </td>
-                  <td style={{ whiteSpace: 'nowrap', fontSize: 13 }}>{u.inspection_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
+                  <td style={{ whiteSpace: 'nowrap', fontSize: 13, opacity: u.hidden ? 0.45 : 1 }}>{u.inspection_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
                   {i === 0 && (
                     <td rowSpan={span} style={{ whiteSpace: 'nowrap' }}>
                       <button className="btn btn-primary btn-sm" onClick={() => check(r)} disabled={checking === r.id}>

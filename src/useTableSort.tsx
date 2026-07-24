@@ -13,8 +13,8 @@ export function useTableSort(storageKey: string, defaultCol: string) {
   }
 
   const Th = ({ col, children }: { col: string; children: React.ReactNode }) => (
-    <th style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => toggleSort(col)}>
-      {children}{sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+    <th style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => toggleSort(col)} title="Click to sort">
+      {children}{sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : <span style={{ opacity: 0.35 }}> ↕</span>}
     </th>
   )
 

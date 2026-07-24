@@ -73,6 +73,13 @@ function looseMatch(a, b) {
   return hits >= Math.max(1, small.size - 1);
 }
 
+function parseHiddenUnits(json) {
+  try {
+    const v = JSON.parse(json || '[]');
+    return Array.isArray(v) ? v : [];
+  } catch { return []; }
+}
+
 function registrationStatus(registrations) {
   if (registrations.length === 0) return { status: 'unknown', label: 'Not checked' };
   const r = registrations[0];
@@ -179,7 +186,8 @@ module.exports = function makeComplianceRouter(db) {
       const registrations = allLicenses.filter(l => l.license_type === 'registration');
       const allLead = db.prepare(`SELECT * FROM lead_records WHERE property_id = ? ORDER BY inspection_date DESC`).all(p.id);
       const leadRecords = allLead.filter(r => r.source !== 'mde-unit');
-      const leadUnits = allLead.filter(r => r.source === 'mde-unit');
+      const hiddenUnits = parseHiddenUnits(p.hidden_lead_units);
+      const leadUnits = allLead.filter(r => r.source === 'mde-unit' && !hiddenUnits.includes(r.unit || ''));
 
       const needsRentalLicense = !p.commercial && !p.license_not_monitored && (p.municipality === 'baltimore_city' || p.municipality === 'baltimore_county');
 
@@ -406,7 +414,9 @@ module.exports = function makeComplianceRouter(db) {
     const props = db.prepare(`SELECT * FROM properties WHERE active = 1 ORDER BY name`).all();
     const out = props.map(p => {
       const rec = db.prepare(`SELECT * FROM lead_records WHERE property_id = ? AND source = 'mde'`).get(p.id);
-      const units = db.prepare(`SELECT unit, cert_number, cert_status, inspection_date FROM lead_records WHERE property_id = ? AND source = 'mde-unit' ORDER BY unit`).all(p.id);
+      const hiddenUnits = parseHiddenUnits(p.hidden_lead_units);
+      const units = db.prepare(`SELECT unit, cert_number, cert_status, inspection_date FROM lead_records WHERE property_id = ? AND source = 'mde-unit' ORDER BY unit`).all(p.id)
+        .map(u => ({ ...u, hidden: hiddenUnits.includes(u.unit || '') ? 1 : 0 }));
       return {
         id: p.id, name: p.name, address: p.address, municipality: p.municipality,
         year_built: p.year_built, commercial: p.commercial, lead_not_monitored: p.lead_not_monitored,
@@ -426,6 +436,19 @@ module.exports = function makeComplianceRouter(db) {
       };
     });
     res.json(out);
+  });
+
+  // Hide/unhide a lead unit row (stale MDE entries that don't map to real units)
+  router.post('/lead-unit-hide/:propertyId', (req, res) => {
+    const property = db.prepare(`SELECT id, hidden_lead_units FROM properties WHERE id = ?`).get(req.params.propertyId);
+    if (!property) return res.status(404).json({ error: 'Not found' });
+    const { unit, hidden } = req.body || {};
+    if (unit == null) return res.status(400).json({ error: 'unit required' });
+
+    const list = new Set(parseHiddenUnits(property.hidden_lead_units));
+    if (hidden) list.add(unit); else list.delete(unit);
+    db.prepare(`UPDATE properties SET hidden_lead_units = ? WHERE id = ?`).run(JSON.stringify([...list]), property.id);
+    res.json({ ok: true, hidden_lead_units: [...list] });
   });
 
   // ── Tax mailing address (SDAT) dashboard ─────────────────────────────────
