@@ -1,9 +1,16 @@
 'use strict';
 
-const MDE_COUNTY_CODES = {
-  baltimore_city:   'BA',
-  baltimore_county: 'BC',
-  harford:          'HR',
+// County option values for each MDE site (discovered by inspecting live pages)
+const OLRR_COUNTY = {
+  baltimore_city:   '3',
+  baltimore_county: '4',
+  harford:          '13',
+};
+
+const LRCA_COUNTY = {
+  baltimore_city:   '251',
+  baltimore_county: '252',
+  harford:          '261',
 };
 
 function parseAddress(address) {
@@ -11,61 +18,58 @@ function parseAddress(address) {
   const match = street.match(/^(\d+)\s+(.+)$/);
   if (!match) return null;
   const parts = match[2].trim().split(/\s+/);
-  const suffixMap = { ST: 'ST', AVE: 'AVE', DR: 'DR', RD: 'RD', LN: 'LN', CT: 'CT', PL: 'PL', WAY: 'WAY', BLVD: 'BLVD', CIR: 'CIR', TER: 'TER', PKWY: 'PKWY' };
+  const suffixes = new Set(['ST', 'AVE', 'DR', 'RD', 'LN', 'CT', 'PL', 'WAY', 'BLVD', 'CIR', 'TER', 'PKWY', 'SQ', 'HWY']);
   const last = parts[parts.length - 1].toUpperCase();
-  const suffix = suffixMap[last] || '';
+  const suffix = suffixes.has(last) ? last : '';
   const name = suffix ? parts.slice(0, -1).join(' ') : parts.join(' ');
   return { number: match[1], name: name.toUpperCase(), suffix };
 }
 
 async function scrapeMdeRegistration(property) {
-  const county = MDE_COUNTY_CODES[property.municipality];
-  if (!county) return { error: `No MDE county code for: ${property.municipality}` };
+  const countyVal = OLRR_COUNTY[property.municipality];
+  if (!countyVal) return { error: `No MDE county for: ${property.municipality}` };
 
   const parsed = parseAddress(property.address);
   if (!parsed) return { error: `Could not parse address: ${property.address}` };
 
   const { chromium } = require('playwright');
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   try {
     const page = await browser.newPage();
+    page.setDefaultTimeout(30000);
+
     await page.goto('https://mdolrr.mde.state.md.us/CustomPages/PublicOLRRSearch.aspx', {
       waitUntil: 'domcontentloaded',
       timeout: 30000,
     });
 
-    // Fill address number
-    await page.fill('input[id*="HouseNumber"], input[id*="houseNumber"], input[name*="HouseNumber"]', parsed.number).catch(() => {});
-    // Fill street name
-    await page.fill('input[id*="StreetName"], input[id*="streetName"], input[name*="StreetName"]', parsed.name).catch(() => {});
-    // Select county
-    await page.selectOption('select[id*="County"], select[name*="County"]', { label: new RegExp(county, 'i') }).catch(async () => {
-      await page.selectOption('select[id*="County"], select[name*="County"]', county).catch(() => {});
-    });
-
-    // Submit
-    await page.click('input[type="submit"], button[type="submit"]').catch(() => {
-      return page.press('input[id*="StreetName"]', 'Enter');
-    });
+    await page.fill('#ucpublicSearch1_txtAddressNo', parsed.number);
+    await page.fill('#ucpublicSearch1_txtStreetName', parsed.name);
+    await page.selectOption('#ucpublicSearch1_ddlCounty', countyVal);
+    await page.click('#ucpublicSearch1_btnPublicSearch');
     await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(1500);
 
-    const bodyText = await page.innerText('body');
-    if (bodyText.toLowerCase().includes('no records') || bodyText.toLowerCase().includes('no results')) {
+    const bodyText = await page.innerText('body').catch(() => '');
+    const lower = bodyText.toLowerCase();
+    if (lower.includes('no records') || lower.includes('no results') || lower.includes('0 record')) {
       return { registered: false, status: 'not_found' };
     }
 
-    // Parse first result row from table
-    const rows = await page.$$('table tr');
-    for (const row of rows.slice(1)) {
-      const cells = await row.$$eval('td', tds => tds.map(td => td.innerText.trim()));
-      if (cells.length >= 3) {
+    // Parse results table: columns are Tracking ID, Owner Name & Address, Company, Property Address, Registration Date, Status
+    const rows = await page.$$eval('table tr', trs =>
+      trs.slice(1).map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
+    );
+
+    for (const cells of rows) {
+      if (cells.length >= 5) {
         return {
           registered: true,
           tracking_id: cells[0] || null,
           owner_name: cells[1] || null,
-          registration_date: cells[2] || null,
-          status: 'registered',
+          property_address: cells[3] || null,
+          registration_date: cells[4] || null,
+          status: (cells[5] || '').toLowerCase().includes('active') ? 'active' : (cells[5] || 'registered'),
         };
       }
     }
@@ -79,40 +83,48 @@ async function scrapeMdeRegistration(property) {
 }
 
 async function scrapeMdeCertificate(property) {
+  const countyVal = LRCA_COUNTY[property.municipality];
+  if (!countyVal) return { error: `No MDE LRCA county for: ${property.municipality}` };
+
   const parsed = parseAddress(property.address);
   if (!parsed) return { error: `Could not parse address: ${property.address}` };
 
   const { chromium } = require('playwright');
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   try {
     const page = await browser.newPage();
+    page.setDefaultTimeout(30000);
+
     await page.goto('https://mde-lrca.maryland.gov/Certificates.aspx', {
       waitUntil: 'domcontentloaded',
       timeout: 30000,
     });
 
-    await page.fill('input[id*="AddressNumber"], input[name*="AddressNumber"]', parsed.number).catch(() => {});
-    await page.fill('input[id*="StreetName"], input[name*="StreetName"]', parsed.name).catch(() => {});
-    await page.click('input[type="submit"], button[type="submit"]').catch(() => {
-      return page.press('input[id*="StreetName"]', 'Enter');
-    });
+    await page.fill('#txtHomeAddressNumber', parsed.number);
+    await page.fill('#txtHomeStreetName', parsed.name);
+    await page.selectOption('#ddlHomeCounty', countyVal);
+    await page.click('#btnHomeSearchProperty');
     await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(1500);
 
-    const bodyText = await page.innerText('body');
-    if (bodyText.toLowerCase().includes('no records') || bodyText.toLowerCase().includes('not found')) {
+    const bodyText = await page.innerText('body').catch(() => '');
+    const lower = bodyText.toLowerCase();
+    if (lower.includes('no property records') || lower.includes('not found') || lower.includes('no records')) {
       return { cert_found: false };
     }
 
-    const rows = await page.$$('table tr');
-    for (const row of rows.slice(1)) {
-      const cells = await row.$$eval('td', tds => tds.map(td => td.innerText.trim()));
+    const rows = await page.$$eval('table tr', trs =>
+      trs.slice(1).map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
+    );
+
+    for (const cells of rows) {
       if (cells.length >= 2) {
         return {
           cert_found: true,
           cert_number: cells[0] || null,
           property_address: cells[1] || null,
           county: cells[2] || null,
+          owner_name: cells[3] || null,
         };
       }
     }
