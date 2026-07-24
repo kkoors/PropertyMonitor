@@ -14,6 +14,7 @@ interface PropertyRow {
   private_ws: number
   water: ComplianceItem
   rental_license: ComplianceItem
+  rental_license_has_letter: boolean
   lead: ComplianceItem
 }
 
@@ -244,6 +245,17 @@ export default function Compliance({ onEditProperty }: Props) {
                       >
                         {checking[`rl-${r.id}`] ? '⟳' : 'License'}
                       </button>
+                    )}
+                    {r.rental_license_has_letter && (
+                      <a
+                        className="btn btn-ghost btn-sm"
+                        href={`/api/compliance/rental-license/letter/${r.id}/${r.municipality}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Download Registration Confirmation Letter"
+                      >
+                        📄
+                      </a>
                     )}
                     {r.year_built && r.year_built < 1978 && !r.lead_free && (
                       <button

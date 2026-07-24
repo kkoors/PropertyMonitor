@@ -136,10 +136,17 @@ function initSchema(db) {
       issue_date TEXT,
       exp_date TEXT,
       scraped_at TEXT,
+      confirmation_letter BLOB,
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  // Migrations — add columns that may not exist on older DBs
+  const cols = db.prepare(`PRAGMA table_info(rental_licenses)`).all().map(c => c.name);
+  if (!cols.includes('confirmation_letter')) {
+    db.prepare(`ALTER TABLE rental_licenses ADD COLUMN confirmation_letter BLOB`).run();
+  }
 
   // Migrations for existing databases
   const billCols = db._db.exec(`PRAGMA table_info(bills)`)[0]?.values.map(r => r[1]) || [];

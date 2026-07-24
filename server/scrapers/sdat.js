@@ -32,111 +32,129 @@ async function scrapeSdatPlaywright(countyCode, parsed) {
     const page = await browser.newPage();
     page.setDefaultTimeout(60000);
 
-    // SDAT uses ASP.NET WebForms — wait for full page load including scripts
     await page.goto('https://sdat.dat.maryland.gov/RealProperty/Pages/default.aspx', {
       waitUntil: 'networkidle',
       timeout: 60000,
     });
 
-    // Dump all select elements to find the right one
-    const selects = await page.locator('select').all();
-    console.log(`[sdat] Found ${selects.length} select elements on page`);
+    const title = await page.title();
+    console.log(`[sdat] Page title: "${title}"`);
 
-    let countySelect = null;
-    for (const sel of selects) {
-      const opts = await sel.locator('option').allTextContents().catch(() => []);
-      // County dropdown will have many options including city/county names
-      if (opts.length > 3) {
-        countySelect = sel;
-        console.log(`[sdat] County select options sample: ${opts.slice(0, 5).join(', ')}`);
-        break;
-      }
-    }
-
-    if (!countySelect) return { error: 'SDAT: county select not found on page' };
-
-    // Try selecting by value first, then by partial text match
-    const selected = await countySelect.selectOption({ value: countyCode }).catch(async () => {
-      const opts = await countySelect.locator('option').all();
-      for (const opt of opts) {
-        const val = await opt.getAttribute('value').catch(() => '');
-        if (val && val.includes(countyCode)) {
-          return countySelect.selectOption({ value: val });
-        }
-      }
-      return null;
+    // Wait for ANY select to appear in the DOM (covers lazy-rendered dropdowns)
+    await page.waitForSelector('select', { timeout: 30000 }).catch(async () => {
+      // Last resort: dump page content for diagnosis
+      const html = await page.content().catch(() => '');
+      console.log('[sdat] No select found. Page HTML snippet:', html.slice(0, 1000));
     });
 
-    if (!selected) return { error: `SDAT: could not select county code ${countyCode}` };
+    const selectCount = await page.locator('select').count();
+    console.log(`[sdat] select count: ${selectCount}`);
+    if (selectCount === 0) return { error: 'SDAT: no select elements on page — site may have changed structure' };
 
-    // WebForms postback after county change — wait for it
+    // Log all select IDs and option counts
+    for (let i = 0; i < selectCount; i++) {
+      const sel = page.locator('select').nth(i);
+      const id  = await sel.getAttribute('id').catch(() => '');
+      const opts = await sel.locator('option').allTextContents().catch(() => []);
+      console.log(`[sdat] select[${i}] id="${id}" opts=${opts.length}: ${opts.slice(0, 4).join(' | ')}`);
+    }
+
+    // Find the county dropdown — it should have the most options
+    let countyIdx = 0;
+    let maxOpts = 0;
+    for (let i = 0; i < selectCount; i++) {
+      const n = await page.locator('select').nth(i).locator('option').count();
+      if (n > maxOpts) { maxOpts = n; countyIdx = i; }
+    }
+    const countySelect = page.locator('select').nth(countyIdx);
+    console.log(`[sdat] Using select[${countyIdx}] as county dropdown (${maxOpts} options)`);
+
+    // Try selecting by value, then by partial text
+    await countySelect.selectOption({ value: countyCode }).catch(async () => {
+      const opts = await countySelect.locator('option').all();
+      for (const opt of opts) {
+        const text = (await opt.textContent() || '').toUpperCase();
+        const val  = await opt.getAttribute('value') || '';
+        if (text.includes('BALTIMORE CITY') && countyCode === '03') {
+          await countySelect.selectOption({ value: val }); return;
+        }
+        if (text.includes('BALTIMORE CO') && countyCode === '02') {
+          await countySelect.selectOption({ value: val }); return;
+        }
+        if (text.includes('HARFORD') && countyCode === '13') {
+          await countySelect.selectOption({ value: val }); return;
+        }
+      }
+      console.log('[sdat] Could not match county in dropdown');
+    });
+
+    // WebForms postback after county selection
     await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1500);
 
-    // Find street number input
-    const allInputs = await page.locator('input[type="text"]').all();
-    console.log(`[sdat] Found ${allInputs.length} text inputs after county select`);
-
-    let numInput = null, nameInput = null;
-    for (const inp of allInputs) {
-      const id = (await inp.getAttribute('id') || '').toLowerCase();
-      const name = (await inp.getAttribute('name') || '').toLowerCase();
-      const ph = (await inp.getAttribute('placeholder') || '').toLowerCase();
-      if (id.includes('number') || name.includes('number') || ph.includes('number')) {
-        numInput = inp;
-      } else if (id.includes('name') || name.includes('name') || ph.includes('name') || id.includes('street')) {
-        nameInput = inp;
-      }
+    // Log visible text inputs
+    const inputs = await page.locator('input[type="text"]:visible').all();
+    console.log(`[sdat] visible text inputs after county select: ${inputs.length}`);
+    for (let i = 0; i < inputs.length; i++) {
+      const id = await inputs[i].getAttribute('id').catch(() => '');
+      const ph = await inputs[i].getAttribute('placeholder').catch(() => '');
+      console.log(`[sdat] input[${i}] id="${id}" placeholder="${ph}"`);
     }
 
-    // Fallback: first two visible text inputs after county select
-    if (!numInput || !nameInput) {
-      const visible = [];
-      for (const inp of allInputs) {
-        if (await inp.isVisible()) visible.push(inp);
-      }
-      console.log(`[sdat] Fallback: ${visible.length} visible inputs, using first two`);
-      numInput = numInput || visible[0];
-      nameInput = nameInput || visible[1];
-    }
+    // Fill street number — try specific selectors first, then by position
+    const numInput = await page.locator([
+      'input[id*="StreetNumber" i]',
+      'input[name*="StreetNumber" i]',
+      'input[placeholder*="Street Number" i]',
+      'input[placeholder*="House" i]',
+    ].join(', ')).first().isVisible().then(v => v
+      ? page.locator(['input[id*="StreetNumber" i]','input[name*="StreetNumber" i]','input[placeholder*="Street Number" i]','input[placeholder*="House" i]'].join(', ')).first()
+      : inputs[0]
+    ).catch(() => inputs[0]);
 
-    if (!numInput || !nameInput) return { error: 'SDAT: could not find address input fields' };
+    const nameInput = await page.locator([
+      'input[id*="StreetName" i]',
+      'input[name*="StreetName" i]',
+      'input[placeholder*="Street Name" i]',
+    ].join(', ')).first().isVisible().then(v => v
+      ? page.locator(['input[id*="StreetName" i]','input[name*="StreetName" i]','input[placeholder*="Street Name" i]'].join(', ')).first()
+      : inputs[1]
+    ).catch(() => inputs[1]);
+
+    if (!numInput || !nameInput) return { error: 'SDAT: could not locate address input fields after county selection' };
 
     await numInput.fill(parsed.number);
     await nameInput.fill(parsed.nameOnly);
+    console.log(`[sdat] Filled: number="${parsed.number}" name="${parsed.nameOnly}"`);
 
-    // Submit
     const searchBtn = page.locator('input[type="submit"], button[type="submit"]').first();
     await searchBtn.click();
 
     await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2000);
 
-    // Find result link
-    const resultLink = page.locator('a').filter({ hasText: /\d/ }).first();
-    const linkText = await resultLink.textContent().catch(() => '');
-    console.log(`[sdat] First result link text: "${linkText}"`);
-
-    const href = await resultLink.getAttribute('href').catch(() => null);
-    if (!href) {
-      const bodyText = await page.innerText('body').catch(() => '');
-      console.log(`[sdat] No result link. Page excerpt: ${bodyText.slice(0, 300)}`);
-      return { error: 'SDAT: no results found for this address' };
+    // Find first link in results (should be account number or address link)
+    const links = await page.locator('table a').all();
+    console.log(`[sdat] Result links: ${links.length}`);
+    if (links.length === 0) {
+      const body = await page.innerText('body').catch(() => '');
+      console.log('[sdat] No result links. Body:', body.slice(0, 400));
+      return { error: 'SDAT: no results — address not found in county database' };
     }
 
-    await resultLink.click();
+    await links[0].click();
     await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(1000);
 
-    const bodyText = await page.innerText('body');
-    const ybMatch = bodyText.match(/year\s*built[:\s]+(\d{4})/i);
+    const body = await page.innerText('body');
+    const ybMatch = body.match(/year\s*built[:\s]+(\d{4})/i);
     const yearBuilt = ybMatch ? Number(ybMatch[1]) : null;
-    const acctMatch = bodyText.match(/account\s*(?:number|#|no\.?)[:\s]+([A-Z0-9\-\s]{4,30}?)(?:\n|\r|$)/i);
+    const acctMatch = body.match(/account\s*(?:number|#|no\.?)[:\s]+([A-Z0-9\-\s]{4,30}?)(?:\n|\r|$)/i);
     const sdatAcct = acctMatch ? acctMatch[1].trim() : null;
 
     if (!yearBuilt) {
-      console.log(`[sdat] Parcel page excerpt: ${bodyText.slice(0, 500)}`);
-      return { error: 'SDAT: property found but year built not present on detail page' };
+      console.log('[sdat] Detail page body:', body.slice(0, 600));
+      return { error: 'SDAT: property detail found but year built not on page' };
     }
 
     return { year_built: yearBuilt, sdat_acct: sdatAcct };

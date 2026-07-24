@@ -74,7 +74,7 @@ module.exports = function makeComplianceRouter(db) {
     `).all();
 
     const result = properties.map(p => {
-      const licenses = db.prepare(`SELECT * FROM rental_licenses WHERE property_id = ?`).all(p.id);
+      const licenses = db.prepare(`SELECT id, municipality, license_type, license_number, status, issue_date, exp_date, scraped_at, notes, (confirmation_letter IS NOT NULL) as has_letter FROM rental_licenses WHERE property_id = ?`).all(p.id);
       const leadRecords = db.prepare(`SELECT * FROM lead_records WHERE property_id = ? ORDER BY inspection_date DESC`).all(p.id);
 
       const needsRentalLicense = p.municipality === 'baltimore_city' || p.municipality === 'baltimore_county';
@@ -89,6 +89,7 @@ module.exports = function makeComplianceRouter(db) {
         private_ws: p.private_ws,
         water: billStatus(p),
         rental_license: needsRentalLicense ? rentalLicenseStatus(licenses, p.municipality) : { status: 'na', label: 'N/A' },
+        rental_license_has_letter: licenses.some(l => l.municipality === p.municipality && l.has_letter),
         lead: leadStatus(p, leadRecords),
       };
     });
@@ -111,17 +112,31 @@ module.exports = function makeComplianceRouter(db) {
     res.json(result);
   });
 
-  // Helper to upsert a rental license result
+  // Helper to upsert a rental license result (including optional confirmation_letter blob)
   function upsertLicense(propertyId, municipality, result) {
+    const letter = result.confirmation_letter || null;
     const existing = db.prepare(`SELECT id FROM rental_licenses WHERE property_id = ? AND municipality = ? AND license_type = 'rental_license'`).get(propertyId, municipality);
     if (existing) {
-      db.prepare(`UPDATE rental_licenses SET license_number=?, status=?, issue_date=?, exp_date=?, scraped_at=datetime('now') WHERE id=?`)
-        .run(result.license_number, result.status, result.issue_date || null, result.exp_date || null, existing.id);
+      const stmt = letter
+        ? db.prepare(`UPDATE rental_licenses SET license_number=?, status=?, issue_date=?, exp_date=?, confirmation_letter=?, scraped_at=datetime('now') WHERE id=?`)
+        : db.prepare(`UPDATE rental_licenses SET license_number=?, status=?, issue_date=?, exp_date=?, scraped_at=datetime('now') WHERE id=?`);
+      letter
+        ? stmt.run(result.license_number, result.status, result.issue_date || null, result.exp_date || null, letter, existing.id)
+        : stmt.run(result.license_number, result.status, result.issue_date || null, result.exp_date || null, existing.id);
     } else {
-      db.prepare(`INSERT INTO rental_licenses (property_id, municipality, license_type, license_number, status, issue_date, exp_date, scraped_at) VALUES (?,?,?,?,?,?,?,datetime('now'))`)
-        .run(propertyId, municipality, 'rental_license', result.license_number, result.status, result.issue_date || null, result.exp_date || null);
+      db.prepare(`INSERT INTO rental_licenses (property_id, municipality, license_type, license_number, status, issue_date, exp_date, confirmation_letter, scraped_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'))`)
+        .run(propertyId, municipality, 'rental_license', result.license_number, result.status, result.issue_date || null, result.exp_date || null, letter);
     }
   }
+
+  // Download stored confirmation letter PDF
+  router.get('/rental-license/letter/:propertyId/:municipality', (req, res) => {
+    const row = db.prepare(`SELECT confirmation_letter FROM rental_licenses WHERE property_id = ? AND municipality = ? AND license_type = 'rental_license'`).get(req.params.propertyId, req.params.municipality);
+    if (!row || !row.confirmation_letter) return res.status(404).json({ error: 'No letter on file' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="rental-registration-${req.params.propertyId}.pdf"`);
+    res.send(row.confirmation_letter);
+  });
 
   // Trigger Baltimore County rental license check
   router.post('/rental-license/county/:propertyId', async (req, res) => {
