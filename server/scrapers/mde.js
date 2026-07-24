@@ -56,22 +56,24 @@ async function scrapeMdeRegistration(property) {
       return { registered: false, status: 'not_found' };
     }
 
-    // Parse results table: columns are Tracking ID, Owner Name & Address, Company, Property Address, Registration Date, Status
+    // Parse results: find data rows where cells[0] is a numeric tracking ID and length === 6
     const rows = await page.$$eval('table tr', trs =>
-      trs.slice(1).map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
+      trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
     );
 
-    for (const cells of rows) {
-      if (cells.length >= 5) {
-        return {
-          registered: true,
-          tracking_id: cells[0] || null,
-          owner_name: cells[1] || null,
-          property_address: cells[3] || null,
-          registration_date: cells[4] || null,
-          status: (cells[5] || '').toLowerCase().includes('active') ? 'active' : (cells[5] || 'registered'),
-        };
-      }
+    const dataRow = rows.find(cells =>
+      cells.length === 6 && /^\d+$/.test(cells[0]) && cells[4].includes('/')
+    );
+
+    if (dataRow) {
+      return {
+        registered: true,
+        tracking_id: dataRow[0] || null,
+        owner_name: dataRow[1] || null,
+        property_address: dataRow[3] || null,
+        registration_date: dataRow[4] || null,
+        status: dataRow[5].toLowerCase().includes('active') ? 'active' : dataRow[5] || 'registered',
+      };
     }
 
     return { registered: true, status: 'registered' };
@@ -113,20 +115,25 @@ async function scrapeMdeCertificate(property) {
       return { cert_found: false };
     }
 
+    // Columns: Address, Unit, Owner/Manager, County, Property#, Parcel, Inspection Date, Cert#, Cert Status, ...
     const rows = await page.$$eval('table tr', trs =>
-      trs.slice(1).map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
+      trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
     );
 
-    for (const cells of rows) {
-      if (cells.length >= 2) {
-        return {
-          cert_found: true,
-          cert_number: cells[0] || null,
-          property_address: cells[1] || null,
-          county: cells[2] || null,
-          owner_name: cells[3] || null,
-        };
-      }
+    const dataRow = rows.find(cells =>
+      cells.length >= 9 && cells[7] && /^\d+$/.test(cells[7])
+    );
+
+    if (dataRow) {
+      return {
+        cert_found: true,
+        property_address: dataRow[0] || null,
+        owner_name: dataRow[2] || null,
+        county: dataRow[3] || null,
+        cert_number: dataRow[7] || null,
+        cert_status: dataRow[8] || null,
+        inspection_date: dataRow[6] ? dataRow[6].split(' ')[0] : null,
+      };
     }
 
     return { cert_found: true };
