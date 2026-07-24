@@ -1,5 +1,6 @@
 'use strict';
 const session = require('express-session');
+const { FileSessionStore } = require('./sessionStore');
 
 const TENANT_ID = process.env.AZURE_TENANT_ID;
 const CLIENT_ID = process.env.AZURE_CLIENT_ID;
@@ -15,6 +16,7 @@ console.log('[auth] REDIRECT_URI:', REDIRECT_URI);
 
 function sessionMiddleware() {
   return session({
+    store: new FileSessionStore(),
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
