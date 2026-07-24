@@ -2,6 +2,7 @@
 const { Router } = require('express');
 const { lookupSdat } = require('../scrapers/sdat');
 const { scrapeRentalLicenseBaltimoreCounty } = require('../scrapers/rentalLicenseBaltimoreCounty');
+const { scrapeRentalLicenseBaltimoreCity } = require('../scrapers/rentalLicenseBaltimoreCity');
 const { scrapeMdeRegistration } = require('../scrapers/mde');
 
 const DAYS = ms => Math.round(ms / 86400000);
@@ -110,45 +111,67 @@ module.exports = function makeComplianceRouter(db) {
     res.json(result);
   });
 
+  // Helper to upsert a rental license result
+  function upsertLicense(propertyId, municipality, result) {
+    const existing = db.prepare(`SELECT id FROM rental_licenses WHERE property_id = ? AND municipality = ? AND license_type = 'rental_license'`).get(propertyId, municipality);
+    if (existing) {
+      db.prepare(`UPDATE rental_licenses SET license_number=?, status=?, issue_date=?, exp_date=?, scraped_at=datetime('now') WHERE id=?`)
+        .run(result.license_number, result.status, result.issue_date || null, result.exp_date || null, existing.id);
+    } else {
+      db.prepare(`INSERT INTO rental_licenses (property_id, municipality, license_type, license_number, status, issue_date, exp_date, scraped_at) VALUES (?,?,?,?,?,?,?,datetime('now'))`)
+        .run(propertyId, municipality, 'rental_license', result.license_number, result.status, result.issue_date || null, result.exp_date || null);
+    }
+  }
+
   // Trigger Baltimore County rental license check
-  router.post('/rental-license/baltimore-county/:propertyId', async (req, res) => {
+  router.post('/rental-license/county/:propertyId', async (req, res) => {
     const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);
     if (!property) return res.status(404).json({ error: 'Not found' });
     if (property.municipality !== 'baltimore_county') return res.status(400).json({ error: 'Not a Baltimore County property' });
 
     const result = await scrapeRentalLicenseBaltimoreCounty(property);
     if (result.error) return res.status(422).json({ error: result.error });
-
-    // Upsert rental license record
-    const existing = db.prepare(`SELECT id FROM rental_licenses WHERE property_id = ? AND municipality = 'baltimore_county' AND license_type = 'rental_license'`).get(property.id);
-    if (existing) {
-      db.prepare(`UPDATE rental_licenses SET license_number=?, status=?, issue_date=?, exp_date=?, scraped_at=datetime('now') WHERE id=?`)
-        .run(result.license_number, result.status, result.issue_date || null, result.exp_date || null, existing.id);
-    } else {
-      db.prepare(`INSERT INTO rental_licenses (property_id, municipality, license_type, license_number, status, issue_date, exp_date, scraped_at) VALUES (?,?,?,?,?,?,?,datetime('now'))`)
-        .run(property.id, 'baltimore_county', 'rental_license', result.license_number, result.status, result.issue_date || null, result.exp_date || null);
-    }
-
+    upsertLicense(property.id, 'baltimore_county', result);
     res.json(result);
   });
 
-  // Bulk: update all Baltimore County rental licenses
+  // Keep old path working
+  router.post('/rental-license/baltimore-county/:propertyId', async (req, res) => {
+    const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);
+    if (!property) return res.status(404).json({ error: 'Not found' });
+    const result = await scrapeRentalLicenseBaltimoreCounty(property);
+    if (result.error) return res.status(422).json({ error: result.error });
+    upsertLicense(property.id, 'baltimore_county', result);
+    res.json(result);
+  });
+
+  // Trigger Baltimore City rental license check
+  router.post('/rental-license/city/:propertyId', async (req, res) => {
+    const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);
+    if (!property) return res.status(404).json({ error: 'Not found' });
+    if (property.municipality !== 'baltimore_city') return res.status(400).json({ error: 'Not a Baltimore City property' });
+
+    const result = await scrapeRentalLicenseBaltimoreCity(property);
+    if (result.error) return res.status(422).json({ error: result.error });
+    upsertLicense(property.id, 'baltimore_city', result);
+    res.json(result);
+  });
+
+  // Bulk: update all rental licenses (Baltimore City + County)
   router.post('/update-all-licenses', async (req, res) => {
-    const properties = db.prepare(`SELECT * FROM properties WHERE active = 1 AND municipality = 'baltimore_county'`).all();
+    const properties = db.prepare(`SELECT * FROM properties WHERE active = 1 AND municipality IN ('baltimore_county', 'baltimore_city')`).all();
     const results = [];
     for (const property of properties) {
-      const result = await scrapeRentalLicenseBaltimoreCounty(property);
-      if (!result.error) {
-        const existing = db.prepare(`SELECT id FROM rental_licenses WHERE property_id = ? AND municipality = 'baltimore_county' AND license_type = 'rental_license'`).get(property.id);
-        if (existing) {
-          db.prepare(`UPDATE rental_licenses SET license_number=?, status=?, issue_date=?, exp_date=?, scraped_at=datetime('now') WHERE id=?`)
-            .run(result.license_number, result.status, result.issue_date || null, result.exp_date || null, existing.id);
-        } else {
-          db.prepare(`INSERT INTO rental_licenses (property_id, municipality, license_type, license_number, status, issue_date, exp_date, scraped_at) VALUES (?,?,?,?,?,?,?,datetime('now'))`)
-            .run(property.id, 'baltimore_county', 'rental_license', result.license_number, result.status, result.issue_date || null, result.exp_date || null);
-        }
+      let result;
+      if (property.municipality === 'baltimore_county') {
+        result = await scrapeRentalLicenseBaltimoreCounty(property);
+      } else {
+        result = await scrapeRentalLicenseBaltimoreCity(property);
       }
-      results.push({ id: property.id, name: property.name, ...result });
+      if (!result.error) {
+        upsertLicense(property.id, property.municipality, result);
+      }
+      results.push({ id: property.id, name: property.name, municipality: property.municipality, ...result });
     }
     res.json({ updated: results.length, results });
   });

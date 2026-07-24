@@ -16,12 +16,8 @@ interface PropertyRow {
   lead: ComplianceItem
 }
 
-const STATUS_COLOR: Record<Status, string> = {
-  green:   '#059669',
-  yellow:  '#d97706',
-  red:     '#dc2626',
-  unknown: '#9ca3af',
-  na:      '#9ca3af',
+interface Props {
+  onEditProperty: (id: number) => void
 }
 
 const STATUS_BG: Record<Status, string> = {
@@ -29,33 +25,38 @@ const STATUS_BG: Record<Status, string> = {
   yellow:  '#fef3c7',
   red:     '#fee2e2',
   unknown: '#f3f4f6',
-  na:      '#f3f4f6',
+  na:      '#f9fafb',
 }
 
-function StatusPill({ item }: { item: ComplianceItem }) {
-  return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 10px',
-      borderRadius: 12,
-      fontSize: 12,
-      fontWeight: 600,
-      background: STATUS_BG[item.status],
-      color: STATUS_COLOR[item.status],
-      whiteSpace: 'nowrap',
-    }}>
-      {item.label}
-    </span>
-  )
+const STATUS_TEXT: Record<Status, string> = {
+  green:   '#065f46',
+  yellow:  '#92400e',
+  red:     '#991b1b',
+  unknown: '#6b7280',
+  na:      '#9ca3af',
 }
 
 const MUNI_LABEL: Record<string, string> = {
-  baltimore_city: 'Balt. City',
+  baltimore_city:   'Balt. City',
   baltimore_county: 'Balt. County',
-  harford: 'Harford',
+  harford:          'Harford',
 }
 
-export default function Compliance() {
+function StatusCell({ item }: { item: ComplianceItem }) {
+  return (
+    <td style={{
+      background: STATUS_BG[item.status],
+      color: STATUS_TEXT[item.status],
+      fontWeight: 600,
+      fontSize: 14,
+      whiteSpace: 'nowrap',
+    }}>
+      {item.label}
+    </td>
+  )
+}
+
+export default function Compliance({ onEditProperty }: Props) {
   const [rows, setRows] = useState<PropertyRow[]>([])
   const [loading, setLoading] = useState(true)
   const [checking, setChecking] = useState<Record<string, boolean>>({})
@@ -74,7 +75,7 @@ export default function Compliance() {
 
   async function updateAllLicenses() {
     setUpdatingAll(true)
-    setUpdateMsg('Checking all Baltimore County licenses…')
+    setUpdateMsg('Checking all licenses…')
     try {
       const res = await fetch('/api/compliance/update-all-licenses', { method: 'POST' })
       const data = await res.json()
@@ -151,45 +152,55 @@ export default function Compliance() {
               <th>Water Bills</th>
               <th>Rental License</th>
               <th>Lead Compliance</th>
-              <th>Actions</th>
+              <th style={{ whiteSpace: 'nowrap' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {rows.map(r => (
               <tr key={r.id}>
                 <td>
-                  <strong>{r.name}</strong>
-                  <div style={{ fontSize: 11, color: '#9ca3af' }}>{r.address}</div>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    style={{ fontWeight: 700, fontSize: 14, padding: '2px 6px', textAlign: 'left' }}
+                    onClick={() => onEditProperty(r.id)}
+                    title="Edit property"
+                  >
+                    {r.name}
+                  </button>
+                  <div style={{ fontSize: 12, color: '#9ca3af', paddingLeft: 6 }}>{r.address}</div>
                 </td>
                 <td>
                   <span className={`badge badge-${r.municipality.replace('baltimore_', '')}`}>
                     {MUNI_LABEL[r.municipality] || r.municipality}
                   </span>
                 </td>
-                <td style={{ textAlign: 'center' }}>
+                <td style={{ textAlign: 'center', fontSize: 14 }}>
                   {r.year_built ?? <span style={{ color: '#9ca3af' }}>—</span>}
                 </td>
-                <td><StatusPill item={r.water} /></td>
-                <td><StatusPill item={r.rental_license} /></td>
-                <td><StatusPill item={r.lead} /></td>
+                <StatusCell item={r.water} />
+                <StatusCell item={r.rental_license} />
+                <StatusCell item={r.lead} />
                 <td style={{ whiteSpace: 'nowrap' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', gap: 4, alignItems: 'center' }}>
                     {!r.year_built && (
                       <button
                         className="btn btn-ghost btn-sm"
                         disabled={!!checking[`sdat-${r.id}`]}
                         onClick={() => runCheck(`/api/compliance/sdat/${r.id}`, `sdat-${r.id}`, 'SDAT')}
                       >
-                        {checking[`sdat-${r.id}`] ? '⟳' : 'SDAT Lookup'}
+                        {checking[`sdat-${r.id}`] ? '⟳' : 'SDAT'}
                       </button>
                     )}
-                    {r.municipality === 'baltimore_county' && (
+                    {(r.municipality === 'baltimore_county' || r.municipality === 'baltimore_city') && (
                       <button
                         className="btn btn-ghost btn-sm"
                         disabled={!!checking[`rl-${r.id}`]}
-                        onClick={() => runCheck(`/api/compliance/rental-license/baltimore-county/${r.id}`, `rl-${r.id}`, 'Rental license')}
+                        onClick={() => runCheck(
+                          `/api/compliance/rental-license/${r.municipality.replace('baltimore_', '')}/${r.id}`,
+                          `rl-${r.id}`, 'License'
+                        )}
                       >
-                        {checking[`rl-${r.id}`] ? '⟳' : 'Check License'}
+                        {checking[`rl-${r.id}`] ? '⟳' : 'License'}
                       </button>
                     )}
                     {r.year_built && r.year_built < 1978 && !r.lead_free && (
@@ -198,12 +209,12 @@ export default function Compliance() {
                         disabled={!!checking[`mde-${r.id}`]}
                         onClick={() => runCheck(`/api/compliance/mde/${r.id}`, `mde-${r.id}`, 'MDE')}
                       >
-                        {checking[`mde-${r.id}`] ? '⟳' : 'Check MDE'}
+                        {checking[`mde-${r.id}`] ? '⟳' : 'MDE'}
                       </button>
                     )}
-                    {messages[`sdat-${r.id}`] && <div style={{ fontSize: 11, color: '#2563eb' }}>{messages[`sdat-${r.id}`]}</div>}
-                    {messages[`rl-${r.id}`] && <div style={{ fontSize: 11, color: '#2563eb' }}>{messages[`rl-${r.id}`]}</div>}
-                    {messages[`mde-${r.id}`] && <div style={{ fontSize: 11, color: '#2563eb' }}>{messages[`mde-${r.id}`]}</div>}
+                    {messages[`sdat-${r.id}`] && <span style={{ fontSize: 11, color: '#2563eb' }}>{messages[`sdat-${r.id}`]}</span>}
+                    {messages[`rl-${r.id}`] && <span style={{ fontSize: 11, color: '#2563eb' }}>{messages[`rl-${r.id}`]}</span>}
+                    {messages[`mde-${r.id}`] && <span style={{ fontSize: 11, color: '#2563eb' }}>{messages[`mde-${r.id}`]}</span>}
                   </div>
                 </td>
               </tr>

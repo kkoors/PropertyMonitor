@@ -10,7 +10,12 @@ const MUNICIPALITIES = [
 
 const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '' }
 
-export default function Properties() {
+interface Props {
+  editPropertyId?: number | null
+  onClearEditId?: () => void
+}
+
+export default function Properties({ editPropertyId, onClearEditId }: Props) {
   const [properties, setProperties] = useState<any[]>([])
   const [form, setForm] = useState({ ...BLANK })
   const [editId, setEditId] = useState<number | null>(null)
@@ -27,6 +32,13 @@ export default function Properties() {
   const [sortDir, setSortDir] = useLocalState<'asc' | 'desc'>('props.sortDir', 'asc')
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    if (editPropertyId && properties.length > 0) {
+      const p = properties.find(x => x.id === editPropertyId)
+      if (p) { startEdit(p); onClearEditId?.() }
+    }
+  }, [editPropertyId, properties])
 
   async function load() {
     const data = await fetch('/api/properties').then(r => r.json())

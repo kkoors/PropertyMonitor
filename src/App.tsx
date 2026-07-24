@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useLocalState } from './useLocalState'
 import Dashboard from './pages/Dashboard'
 import Properties from './pages/Properties'
@@ -11,6 +12,16 @@ type Page = 'compliance' | 'properties' | 'lookup' | 'bills' | 'dashboard' | 'sc
 
 export default function App() {
   const [page, setPage] = useLocalState<Page>('app.page', 'compliance')
+  const [editPropertyId, setEditPropertyId] = useState<number | null>(null)
+
+  function goEditProperty(id: number) {
+    setEditPropertyId(id)
+    setPage('properties')
+  }
+
+  function clearEditProperty() {
+    setEditPropertyId(null)
+  }
 
   const nav = (p: Page, label: string) => (
     <button key={p} className={`nav-link ${page === p ? 'active' : ''}`} onClick={() => setPage(p)}>
@@ -37,8 +48,8 @@ export default function App() {
         </div>
       </nav>
       <main className="main">
-        {page === 'compliance'  && <Compliance />}
-        {page === 'properties'  && <Properties />}
+        {page === 'compliance'  && <Compliance onEditProperty={goEditProperty} />}
+        {page === 'properties'  && <Properties editPropertyId={editPropertyId} onClearEditId={clearEditProperty} />}
         {page === 'lookup'      && <AddressLookup onAddProperties={() => setPage('properties')} />}
         {page === 'dashboard'   && <Dashboard onNavigate={p => setPage(p as Page)} />}
         {page === 'bills'       && <Bills />}
