@@ -88,7 +88,7 @@ export default function LeadRegistry({ onEditProperty }: { onEditProperty?: (id:
       </div>
       {error && <div className="card" style={{ color: '#991b1b', fontSize: 13 }}>{error}</div>}
       <div className="card" style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%' }}>
+        <table style={{ width: '100%', minWidth: 'max-content' }}>
           <thead>
             <tr>
               <Th col="name">Property</Th><Th col="tracking_id">Tracking ID</Th><Th col="registry_owner">Registry Owner</Th><th>Registry Owner Address</th>
@@ -103,7 +103,7 @@ export default function LeadRegistry({ onEditProperty }: { onEditProperty?: (id:
               const visibleUnits = showHidden ? r.units : r.units.filter((u: any) => !u.hidden)
               const units: any[] = (r.multifamily && visibleUnits.length > 0)
                 ? visibleUnits
-                : [{ unit: r.multifamily ? '?' : '', cert_number: r.cert_number, cert_status: r.cert_status, inspection_date: r.inspection_date, nohide: true }]
+                : [{ unit: r.multifamily ? '?' : '', cert_number: r.cert_number, cert_status: r.cert_status, inspection_date: r.inspection_date, has_pdf: r.has_cert_pdf, nohide: true, propertyLevel: true }]
               const span = units.length
               return units.map((u: any, i: number) => (
                 <tr key={`${r.id}-${u.unit ?? i}`}>
@@ -150,6 +150,12 @@ export default function LeadRegistry({ onEditProperty }: { onEditProperty?: (id:
                     {u.cert_number
                       ? <span style={{ color: (u.cert_status || '').includes('PASS') ? '#166534' : '#991b1b', fontWeight: 600 }}>{u.cert_number} {u.cert_status}</span>
                       : <span style={{color:'#9ca3af'}}>{r.multifamily ? 'no cert' : '—'}</span>}
+                    {u.has_pdf ? (
+                      <a
+                        href={`/api/compliance/lead-cert-pdf/${r.id}${u.propertyLevel ? '' : `?unit=${encodeURIComponent(u.unit || '')}`}`}
+                        target="_blank" rel="noreferrer" title="View certificate PDF" style={{ marginLeft: 6 }}
+                      >📄</a>
+                    ) : null}
                   </td>
                   <td style={{ whiteSpace: 'nowrap', fontSize: 13, opacity: u.hidden ? 0.45 : 1 }}>{u.inspection_date || <span style={{color:'#9ca3af'}}>—</span>}</td>
                   {i === 0 && (

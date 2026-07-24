@@ -175,6 +175,7 @@ function initSchema(db) {
 
   db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
   if (!leadCols.includes('unit')) db.prepare(`ALTER TABLE lead_records ADD COLUMN unit TEXT`).run();
+  if (!leadCols.includes('cert_pdf')) db.prepare(`ALTER TABLE lead_records ADD COLUMN cert_pdf BLOB`).run();
 
   // Migrations for existing databases
   const billCols = db._db.exec(`PRAGMA table_info(bills)`)[0]?.values.map(r => r[1]) || [];

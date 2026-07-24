@@ -56,7 +56,7 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
       </div>
       {error && <div className="card" style={{ color: '#991b1b', fontSize: 13 }}>{error}</div>}
       <div className="card" style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%' }}>
+        <table style={{ width: '100%', minWidth: 'max-content' }}>
           <thead>
             <tr>
               <Th col="name">Property</Th><th>Address</th><Th col="municipality">Municipality</Th>

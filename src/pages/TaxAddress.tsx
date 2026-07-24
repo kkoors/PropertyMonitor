@@ -49,7 +49,7 @@ export default function TaxAddress({ onEditProperty }: { onEditProperty?: (id: n
       </p>
       {error && <div className="card" style={{ color: '#991b1b', fontSize: 13 }}>{error}</div>}
       <div className="card" style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%' }}>
+        <table style={{ width: '100%', minWidth: 'max-content' }}>
           <thead>
             <tr>
               <Th col="name">Property</Th><Th col="tax_id">Tax ID</Th><th>Owner Address (on file)</th><th>SDAT Mailing Address</th><Th col="flagStatus">Status</Th><Th col="sdat_checked_at">Checked</Th><th>Actions</th>

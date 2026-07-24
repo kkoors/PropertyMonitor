@@ -185,7 +185,8 @@ async function scrapeMdeCertificate(property) {
   const { chromium } = require('playwright');
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
   try {
-    const page = await browser.newPage();
+    const context = await browser.newContext({ acceptDownloads: true });
+    const page = await context.newPage();
     page.setDefaultTimeout(30000);
 
     // Try progressively looser street names until something matches
@@ -228,6 +229,7 @@ async function scrapeMdeCertificate(property) {
     }
 
     if (dataRows.length > 0) {
+      const dataRowsOriginal = [...dataRows]; // document order = GridView row order, needed for download links
       const parseUs = d => { const m = (d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(`${m[3]}-${m[1]}-${m[2]}`).getTime() : 0; };
       dataRows.sort((a, b) => parseUs(b[6]) - parseUs(a[6]));
 
@@ -243,13 +245,43 @@ async function scrapeMdeCertificate(property) {
         const unit = normUnit(row[1]);
         if (!byUnit.has(unit)) byUnit.set(unit, row); // rows are sorted newest-first
       }
-      const units = [...byUnit.entries()].map(([unit, r]) => ({
-        unit,
-        cert_number: r[7] || null,
-        cert_status: r[8] || null,
-        inspection_date: r[6] ? r[6].split(' ')[0] : null,
-      }));
-      console.log(`[mde-lrca] ${units.length} unit(s): ${units.map(u => `${u.unit || '(whole)'}=${u.cert_status}`).join(', ')}`);
+
+      // Grid row index (document order) → GridView control id ctl02, ctl03, …
+      // Used to click the Certificate-column link and capture the PDF download.
+      const gridIndexOf = row => dataRowsOriginal.indexOf(row);
+      async function downloadCertPdf(row) {
+        const k = gridIndexOf(row);
+        if (k < 0) return null;
+        const ctl = `HomePropertyGridView$ctl${String(k + 2).padStart(2, '0')}$ctl00`;
+        const link = page.locator(`a[href*="${ctl}"]`).first();
+        if (await link.count() === 0) return null;
+        try {
+          const [dl] = await Promise.all([
+            page.waitForEvent('download', { timeout: 15000 }),
+            link.click(),
+          ]);
+          const p = await dl.path();
+          const buf = require('fs').readFileSync(p);
+          console.log(`[mde-lrca] downloaded cert PDF row ${k}: ${buf.length} bytes`);
+          return buf;
+        } catch (err) {
+          console.log(`[mde-lrca] cert PDF download failed row ${k}: ${err.message}`);
+          return null;
+        }
+      }
+
+      const units = [];
+      for (const [unit, r] of byUnit.entries()) {
+        const pdf = units.length < 25 ? await downloadCertPdf(r) : null;
+        units.push({
+          unit,
+          cert_number: r[7] || null,
+          cert_status: r[8] || null,
+          inspection_date: r[6] ? r[6].split(' ')[0] : null,
+          cert_pdf: pdf,
+        });
+      }
+      console.log(`[mde-lrca] ${units.length} unit(s): ${units.map(u => `${u.unit || '(whole)'}=${u.cert_status}${u.cert_pdf ? '+pdf' : ''}`).join(', ')}`);
 
       const best = dataRows[0];
       return {
@@ -260,6 +292,7 @@ async function scrapeMdeCertificate(property) {
         cert_number: best[7] || null,
         cert_status: best[8] || null,
         inspection_date: best[6] ? best[6].split(' ')[0] : null,
+        cert_pdf: units.find(u => u.cert_number === best[7])?.cert_pdf || null,
         units,
       };
     }

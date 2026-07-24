@@ -364,21 +364,22 @@ module.exports = function makeComplianceRouter(db) {
         owner_address: registered ? reg.owner_address : null,
         bank_date: registered ? normalizeUsDate(reg.bank_date) : null,
         payment_year: registered ? reg.payment_year : null,
+        cert_pdf: certFound ? (cert.cert_pdf || null) : null,
       };
       if (existing) {
-        db.prepare(`UPDATE lead_records SET tracking_id=?, registration_date=?, registration_status=?, cert_number=?, cert_status=?, inspection_date=?, owner_name=?, owner_address=?, bank_date=?, payment_year=?, notes=? WHERE id=?`)
-          .run(vals.tracking_id, vals.registration_date, vals.registration_status, vals.cert_number, vals.cert_status, vals.inspection_date, vals.owner_name, vals.owner_address, vals.bank_date, vals.payment_year, notes, existing.id);
+        db.prepare(`UPDATE lead_records SET tracking_id=?, registration_date=?, registration_status=?, cert_number=?, cert_status=?, inspection_date=?, owner_name=?, owner_address=?, bank_date=?, payment_year=?, cert_pdf=COALESCE(?, cert_pdf), notes=? WHERE id=?`)
+          .run(vals.tracking_id, vals.registration_date, vals.registration_status, vals.cert_number, vals.cert_status, vals.inspection_date, vals.owner_name, vals.owner_address, vals.bank_date, vals.payment_year, vals.cert_pdf, notes, existing.id);
       } else {
-        db.prepare(`INSERT INTO lead_records (property_id, tracking_id, registration_date, registration_status, cert_number, cert_status, inspection_date, owner_name, owner_address, bank_date, payment_year, notes, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'mde')`)
-          .run(property.id, vals.tracking_id, vals.registration_date, vals.registration_status, vals.cert_number, vals.cert_status, vals.inspection_date, vals.owner_name, vals.owner_address, vals.bank_date, vals.payment_year, notes);
+        db.prepare(`INSERT INTO lead_records (property_id, tracking_id, registration_date, registration_status, cert_number, cert_status, inspection_date, owner_name, owner_address, bank_date, payment_year, cert_pdf, notes, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'mde')`)
+          .run(property.id, vals.tracking_id, vals.registration_date, vals.registration_status, vals.cert_number, vals.cert_status, vals.inspection_date, vals.owner_name, vals.owner_address, vals.bank_date, vals.payment_year, vals.cert_pdf, notes);
       }
 
       // Multifamily: store one record per unit (latest cert each)
       if (property.multifamily && certFound && Array.isArray(cert.units)) {
         db.prepare(`DELETE FROM lead_records WHERE property_id = ? AND source = 'mde-unit'`).run(property.id);
-        const ins = db.prepare(`INSERT INTO lead_records (property_id, unit, cert_number, cert_status, inspection_date, source) VALUES (?,?,?,?,?,'mde-unit')`);
+        const ins = db.prepare(`INSERT INTO lead_records (property_id, unit, cert_number, cert_status, inspection_date, cert_pdf, source) VALUES (?,?,?,?,?,?,'mde-unit')`);
         for (const u of cert.units) {
-          ins.run(property.id, u.unit || '', u.cert_number, u.cert_status, normalizeUsDate(u.inspection_date));
+          ins.run(property.id, u.unit || '', u.cert_number, u.cert_status, normalizeUsDate(u.inspection_date), u.cert_pdf || null);
         }
       }
     }
@@ -419,7 +420,7 @@ module.exports = function makeComplianceRouter(db) {
     const out = props.map(p => {
       const rec = db.prepare(`SELECT * FROM lead_records WHERE property_id = ? AND source = 'mde'`).get(p.id);
       const hiddenUnits = parseHiddenUnits(p.hidden_lead_units);
-      const units = db.prepare(`SELECT unit, cert_number, cert_status, inspection_date FROM lead_records WHERE property_id = ? AND source = 'mde-unit' ORDER BY unit`).all(p.id)
+      const units = db.prepare(`SELECT unit, cert_number, cert_status, inspection_date, (cert_pdf IS NOT NULL) as has_pdf FROM lead_records WHERE property_id = ? AND source = 'mde-unit' ORDER BY unit`).all(p.id)
         .map(u => ({ ...u, hidden: hiddenUnits.includes(u.unit || '') ? 1 : 0 }));
       return {
         id: p.id, name: p.name, address: p.address, municipality: p.municipality,
@@ -434,12 +435,25 @@ module.exports = function makeComplianceRouter(db) {
         cert_number: rec?.cert_number || null,
         cert_status: rec?.cert_status || null,
         inspection_date: rec?.inspection_date || null,
+        has_cert_pdf: rec?.cert_pdf ? 1 : 0,
         owner_name_match: looseMatch(p.owner_name, rec?.owner_name),
         owner_address_match: looseMatch(p.owner_address, rec?.owner_address),
         units,
       };
     });
     res.json(out);
+  });
+
+  // Serve a stored lead inspection certificate PDF (?unit= for multifamily units)
+  router.get('/lead-cert-pdf/:propertyId', (req, res) => {
+    const unit = req.query.unit;
+    const row = unit != null
+      ? db.prepare(`SELECT cert_pdf FROM lead_records WHERE property_id = ? AND source = 'mde-unit' AND unit = ?`).get(req.params.propertyId, unit)
+      : db.prepare(`SELECT cert_pdf FROM lead_records WHERE property_id = ? AND source = 'mde'`).get(req.params.propertyId);
+    if (!row || !row.cert_pdf) return res.status(404).json({ error: 'No certificate PDF on file' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="lead-cert-${req.params.propertyId}${unit ? '-' + unit : ''}.pdf"`);
+    res.send(row.cert_pdf);
   });
 
   // Hide/unhide a lead unit row (stale MDE entries that don't map to real units)
