@@ -154,6 +154,15 @@ function initSchema(db) {
   if (!leadCols.includes('registration_status')) db.prepare(`ALTER TABLE lead_records ADD COLUMN registration_status TEXT`).run();
   if (!leadCols.includes('cert_status')) db.prepare(`ALTER TABLE lead_records ADD COLUMN cert_status TEXT`).run();
   if (!leadCols.includes('source')) db.prepare(`ALTER TABLE lead_records ADD COLUMN source TEXT`).run();
+  if (!leadCols.includes('owner_name')) db.prepare(`ALTER TABLE lead_records ADD COLUMN owner_name TEXT`).run();
+  if (!leadCols.includes('owner_address')) db.prepare(`ALTER TABLE lead_records ADD COLUMN owner_address TEXT`).run();
+  if (!leadCols.includes('bank_date')) db.prepare(`ALTER TABLE lead_records ADD COLUMN bank_date TEXT`).run();
+  if (!leadCols.includes('payment_year')) db.prepare(`ALTER TABLE lead_records ADD COLUMN payment_year INTEGER`).run();
+
+  const ownerCols = db.prepare(`PRAGMA table_info(properties)`).all().map(c => c.name);
+  if (!ownerCols.includes('owner_name')) db.prepare(`ALTER TABLE properties ADD COLUMN owner_name TEXT`).run();
+  if (!ownerCols.includes('owner_address')) db.prepare(`ALTER TABLE properties ADD COLUMN owner_address TEXT`).run();
+  if (!ownerCols.includes('commercial')) db.prepare(`ALTER TABLE properties ADD COLUMN commercial INTEGER NOT NULL DEFAULT 0`).run();
 
   // Migrations for existing databases
   const billCols = db._db.exec(`PRAGMA table_info(bills)`)[0]?.values.map(r => r[1]) || [];

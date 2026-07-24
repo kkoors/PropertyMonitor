@@ -8,7 +8,7 @@ const MUNICIPALITIES = [
   { value: 'harford', label: 'Harford County' },
 ]
 
-const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '' }
+const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '', owner_name: '', owner_address: '', commercial: false }
 
 interface Props {
   editPropertyId?: number | null
@@ -53,6 +53,9 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
       private_ws: form.private_ws ? 1 : 0,
       year_built: form.year_built ? Number(form.year_built) : null,
       lead_free: form.lead_free ? 1 : 0,
+      commercial: form.commercial ? 1 : 0,
+      owner_name: form.owner_name || null,
+      owner_address: form.owner_address || null,
       lead_free_cert_date: form.lead_free_cert_date || null,
       lead_free_cert_exp_date: form.lead_free_cert_exp_date || null,
     }) })
@@ -63,7 +66,7 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
   }
 
   function startEdit(p: any) {
-    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '' })
+    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '', owner_name: p.owner_name || '', owner_address: p.owner_address || '', commercial: !!p.commercial })
     setEditId(p.id)
     setShowForm(true)
   }
@@ -174,6 +177,21 @@ export default function Properties({ editPropertyId, onClearEditId }: Props) {
             <div className="form-group">
               <label>Notes</label>
               <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label>Owner Name</label>
+              <input value={form.owner_name} onChange={e => setForm(f => ({ ...f, owner_name: e.target.value }))} placeholder="Legal owner (as on deed/MDE)" />
+            </div>
+            <div className="form-group full-col">
+              <label>Owner Address</label>
+              <input value={form.owner_address} onChange={e => setForm(f => ({ ...f, owner_address: e.target.value }))} placeholder="Owner mailing address (not the property address)" />
+            </div>
+            <div className="form-group" style={{ justifyContent: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
+                <input type="checkbox" checked={form.commercial} onChange={e => setForm(f => ({ ...f, commercial: e.target.checked }))} />
+                Commercial
+              </label>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>No rental license or lead compliance needed</span>
             </div>
             <div className="form-group">
               <label>Year Built</label>

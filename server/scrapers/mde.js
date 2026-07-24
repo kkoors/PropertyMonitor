@@ -77,14 +77,57 @@ async function scrapeMdeRegistration(property) {
         return parseUs(b[4]) - parseUs(a[4]);
       });
       const best = dataRows[0];
-      return {
+
+      // Owner cell is "Name\nStreet\nCity, State, ZIP" — split name from mailing address
+      const ownerLines = (best[1] || '').split('\n').map(s => s.trim()).filter(Boolean);
+      const result = {
         registered: true,
         tracking_id: best[0] || null,
-        owner_name: best[1] || null,
+        owner_name: ownerLines[0] || null,
+        owner_address: ownerLines.slice(1).join(', ') || null,
         property_address: best[3] || null,
         registration_date: best[4] || null,
         status: best[5].toLowerCase().includes('active') ? 'active' : best[5] || 'registered',
       };
+
+      // Drill into Property History (property address is a postback link) for Bank Date + Payment Year
+      try {
+        const histLink = page.locator('a[id*="lnkPropertyAddress"]').first();
+        if (await histLink.isVisible().catch(() => false)) {
+          await histLink.click();
+          await page.waitForFunction(() =>
+            document.body.innerText.includes('Property History') &&
+            document.body.innerText.includes('Payment Year'),
+            { timeout: 20000 }
+          ).catch(() => {});
+
+          // History rows: TrackingID, Owner, PropertyAddr, ConstYear, Status, RemovalDate, StatusCode, RegDate, BankDate, PaymentYear
+          const histRows = await page.$$eval('table tr', trs =>
+            trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
+          );
+          const hist = histRows.filter(cells => cells.length >= 10 && /^\d{5,}$/.test(cells[0]) && /^\d{4}$/.test(cells[9]));
+          console.log(`[mde-olrr] history: ${hist.length} rows`);
+
+          if (hist.length > 0) {
+            // Prefer Active rows; take the max payment year
+            const active = hist.filter(c => c[4].toLowerCase().includes('active'));
+            const pool = active.length > 0 ? active : hist;
+            pool.sort((a, b) => Number(b[9]) - Number(a[9]));
+            const h = pool[0];
+            const hOwner = (h[1] || '').split('\n').map(s => s.trim()).filter(Boolean);
+            result.owner_name = hOwner[0] || result.owner_name;
+            result.owner_address = hOwner.slice(1).join(', ') || result.owner_address;
+            result.registration_date = h[7] || result.registration_date;
+            result.bank_date = h[8] || null;
+            result.payment_year = Number(h[9]) || null;
+            console.log(`[mde-olrr] latest: bank_date=${result.bank_date} payment_year=${result.payment_year}`);
+          }
+        }
+      } catch (err) {
+        console.log(`[mde-olrr] history drill-down failed: ${err.message}`);
+      }
+
+      return result;
     }
 
     const bodyText = await page.innerText('body').catch(() => '');

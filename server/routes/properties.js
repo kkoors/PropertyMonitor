@@ -27,24 +27,24 @@ module.exports = function makePropertiesRouter(db) {
   });
 
   router.post('/', (req, res) => {
-    const { name, address, municipality, account_number, notes, private_ws, year_built, lead_free, lead_free_cert_date, lead_free_cert_exp_date } = req.body;
+    const { name, address, municipality, account_number, notes, private_ws, year_built, lead_free, lead_free_cert_date, lead_free_cert_exp_date, owner_name, owner_address, commercial } = req.body;
     if (!name || !address || !municipality) {
       return res.status(400).json({ error: 'name, address, and municipality are required' });
     }
     const result = db.prepare(`
-      INSERT INTO properties (name, address, municipality, account_number, notes, private_ws, year_built, lead_free, lead_free_cert_date, lead_free_cert_exp_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(name, address, municipality, account_number || null, notes || null, private_ws ? 1 : 0, year_built || null, lead_free ? 1 : 0, lead_free_cert_date || null, lead_free_cert_exp_date || null);
+      INSERT INTO properties (name, address, municipality, account_number, notes, private_ws, year_built, lead_free, lead_free_cert_date, lead_free_cert_exp_date, owner_name, owner_address, commercial)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(name, address, municipality, account_number || null, notes || null, private_ws ? 1 : 0, year_built || null, lead_free ? 1 : 0, lead_free_cert_date || null, lead_free_cert_exp_date || null, owner_name || null, owner_address || null, commercial ? 1 : 0);
     res.status(201).json({ id: result.lastInsertRowid });
   });
 
   router.put('/:id', (req, res) => {
-    const { name, address, municipality, account_number, notes, active, private_ws, year_built, lead_free, lead_free_cert_date, lead_free_cert_exp_date } = req.body;
+    const { name, address, municipality, account_number, notes, active, private_ws, year_built, lead_free, lead_free_cert_date, lead_free_cert_exp_date, owner_name, owner_address, commercial } = req.body;
     db.prepare(`
       UPDATE properties SET name=?, address=?, municipality=?, account_number=?, notes=?, active=?, private_ws=?,
-        year_built=?, lead_free=?, lead_free_cert_date=?, lead_free_cert_exp_date=?
+        year_built=?, lead_free=?, lead_free_cert_date=?, lead_free_cert_exp_date=?, owner_name=?, owner_address=?, commercial=?
       WHERE id=?
-    `).run(name, address, municipality, account_number, notes, active ?? 1, private_ws ? 1 : 0, year_built || null, lead_free ? 1 : 0, lead_free_cert_date || null, lead_free_cert_exp_date || null, req.params.id);
+    `).run(name, address, municipality, account_number, notes, active ?? 1, private_ws ? 1 : 0, year_built || null, lead_free ? 1 : 0, lead_free_cert_date || null, lead_free_cert_exp_date || null, owner_name || null, owner_address || null, commercial ? 1 : 0, req.params.id);
     res.json({ ok: true });
   });
 

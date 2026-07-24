@@ -40,7 +40,22 @@ function rentalLicenseStatus(licenses, municipality) {
   return { status: 'green', label: active.exp_date ? `Expires ${active.exp_date}` : 'Active' };
 }
 
+// Loose normalized comparison for names/addresses ("Sheila M Veney" vs "SHEILA VENEY")
+function looseMatch(a, b) {
+  if (!a || !b) return null; // can't compare
+  const norm = s => s.toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const na = norm(a), nb = norm(b);
+  if (!na || !nb) return null;
+  if (na.includes(nb) || nb.includes(na)) return true;
+  // Token overlap: consider a match if most tokens of the shorter string appear in the longer
+  const ta = new Set(na.split(' ')), tb = new Set(nb.split(' '));
+  const [small, big] = ta.size <= tb.size ? [ta, tb] : [tb, ta];
+  const hits = [...small].filter(t => big.has(t)).length;
+  return hits >= Math.max(1, small.size - 1);
+}
+
 function leadStatus(property, leadRecords) {
+  if (property.commercial) return { status: 'na', label: 'Commercial' };
   const yearBuilt = property.year_built;
   if (yearBuilt && yearBuilt >= 1978) return { status: 'na', label: 'Post-1978' };
   if (!yearBuilt) return { status: 'unknown', label: 'Year built unknown' };
@@ -65,16 +80,32 @@ function leadStatus(property, leadRecords) {
   }
   const registered = latest.registration_status && latest.registration_status !== 'not_found';
   const certPassed = (latest.cert_status || '').toUpperCase().includes('PASS');
-  // MDE registration must be renewed every year — only current-year registrations count
-  const regYear = latest.registration_date ? new Date(latest.registration_date).getFullYear() : null;
   const currentYear = new Date().getFullYear();
-  const regCurrent = registered && regYear === currentYear;
 
-  if (registered && !regCurrent) {
-    return { status: 'red', label: `Registration not renewed for ${currentYear} (last ${latest.registration_date || 'unknown'})` };
+  // Annual renewal: MDE payment year must cover the current year (or next)
+  const payYear = latest.payment_year ? Number(latest.payment_year) : null;
+  const renewalCurrent = payYear !== null
+    ? payYear >= currentYear
+    : (latest.registration_date && new Date(latest.registration_date).getFullYear() === currentYear); // fallback if no history
+
+  // Registration must be under the CURRENT owner, at the owner's mailing address on file
+  const ownerNameOk = looseMatch(property.owner_name, latest.owner_name);
+  const ownerAddrOk = looseMatch(property.owner_address, latest.owner_address);
+
+  if (registered && ownerNameOk === false) {
+    return { status: 'red', label: `Registered to prior owner (${latest.owner_name})` };
   }
-  if (regCurrent && certPassed) return { status: 'green', label: `Registered ${currentYear} · Cert ${latest.cert_number} passed` };
-  if (regCurrent) return { status: 'yellow', label: `Registered ${currentYear} · no cert` };
+  if (registered && ownerAddrOk === false) {
+    return { status: 'red', label: `MDE owner address mismatch (${latest.owner_address})` };
+  }
+  if (registered && !renewalCurrent) {
+    return { status: 'red', label: payYear ? `Renewal lapsed — paid through ${payYear}` : `Registration not renewed for ${currentYear}` };
+  }
+  if (registered && renewalCurrent) {
+    const ownerNote = (ownerNameOk === null || ownerAddrOk === null) ? ' · owner not verified' : '';
+    if (certPassed) return { status: ownerNote ? 'yellow' : 'green', label: `Paid thru ${payYear || currentYear} · Cert ${latest.cert_number} passed${ownerNote}` };
+    return { status: 'yellow', label: `Paid thru ${payYear || currentYear} · no cert${ownerNote}` };
+  }
   if (certPassed) return { status: 'yellow', label: `Cert ${latest.cert_number} passed · not registered` };
   if (latest.inspection_date) return { status: 'green', label: `Inspected ${latest.inspection_date}` };
   return { status: 'yellow', label: 'Lead record on file' };
@@ -97,7 +128,7 @@ module.exports = function makeComplianceRouter(db) {
       const licenses = db.prepare(`SELECT id, municipality, license_type, license_number, status, issue_date, exp_date, scraped_at, notes, (confirmation_letter IS NOT NULL) as has_letter FROM rental_licenses WHERE property_id = ?`).all(p.id);
       const leadRecords = db.prepare(`SELECT * FROM lead_records WHERE property_id = ? ORDER BY inspection_date DESC`).all(p.id);
 
-      const needsRentalLicense = p.municipality === 'baltimore_city' || p.municipality === 'baltimore_county';
+      const needsRentalLicense = !p.commercial && (p.municipality === 'baltimore_city' || p.municipality === 'baltimore_county');
 
       return {
         id: p.id,
@@ -108,7 +139,7 @@ module.exports = function makeComplianceRouter(db) {
         lead_free: p.lead_free,
         private_ws: p.private_ws,
         water: billStatus(p),
-        rental_license: needsRentalLicense ? rentalLicenseStatus(licenses, p.municipality) : { status: 'na', label: 'N/A' },
+        rental_license: needsRentalLicense ? rentalLicenseStatus(licenses, p.municipality) : { status: 'na', label: p.commercial ? 'Commercial' : 'N/A' },
         rental_license_has_letter: licenses.some(l => l.municipality === p.municipality && l.has_letter),
         lead: leadStatus(p, leadRecords),
       };
@@ -240,13 +271,17 @@ module.exports = function makeComplianceRouter(db) {
         cert_number: certFound ? cert.cert_number : null,
         cert_status: certFound ? cert.cert_status : null,
         inspection_date: certFound ? normalizeUsDate(cert.inspection_date) : null,
+        owner_name: registered ? reg.owner_name : null,
+        owner_address: registered ? reg.owner_address : null,
+        bank_date: registered ? normalizeUsDate(reg.bank_date) : null,
+        payment_year: registered ? reg.payment_year : null,
       };
       if (existing) {
-        db.prepare(`UPDATE lead_records SET tracking_id=?, registration_date=?, registration_status=?, cert_number=?, cert_status=?, inspection_date=?, notes=? WHERE id=?`)
-          .run(vals.tracking_id, vals.registration_date, vals.registration_status, vals.cert_number, vals.cert_status, vals.inspection_date, notes, existing.id);
+        db.prepare(`UPDATE lead_records SET tracking_id=?, registration_date=?, registration_status=?, cert_number=?, cert_status=?, inspection_date=?, owner_name=?, owner_address=?, bank_date=?, payment_year=?, notes=? WHERE id=?`)
+          .run(vals.tracking_id, vals.registration_date, vals.registration_status, vals.cert_number, vals.cert_status, vals.inspection_date, vals.owner_name, vals.owner_address, vals.bank_date, vals.payment_year, notes, existing.id);
       } else {
-        db.prepare(`INSERT INTO lead_records (property_id, tracking_id, registration_date, registration_status, cert_number, cert_status, inspection_date, notes, source) VALUES (?,?,?,?,?,?,?,?,'mde')`)
-          .run(property.id, vals.tracking_id, vals.registration_date, vals.registration_status, vals.cert_number, vals.cert_status, vals.inspection_date, notes);
+        db.prepare(`INSERT INTO lead_records (property_id, tracking_id, registration_date, registration_status, cert_number, cert_status, inspection_date, owner_name, owner_address, bank_date, payment_year, notes, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'mde')`)
+          .run(property.id, vals.tracking_id, vals.registration_date, vals.registration_status, vals.cert_number, vals.cert_status, vals.inspection_date, vals.owner_name, vals.owner_address, vals.bank_date, vals.payment_year, notes);
       }
     }
 
