@@ -30,7 +30,11 @@ function rentalLicenseStatus(licenses, municipality) {
   const active = relevant.find(l => l.status === 'active');
   if (!active) {
     const expired = relevant.find(l => l.status === 'expired');
-    return expired ? { status: 'red', label: `Expired ${expired.exp_date || ''}` } : { status: 'yellow', label: relevant[0].status };
+    if (expired) return { status: 'red', label: `Expired ${expired.exp_date || ''}` };
+    const st = relevant[0].status;
+    if (st === 'not_found') return { status: 'red', label: 'Not registered' };
+    if (st === 'not_licensed') return { status: 'red', label: 'Registered, not licensed' };
+    return { status: 'yellow', label: st };
   }
   if (active.exp_date) {
     const daysLeft = DAYS(new Date(active.exp_date) - new Date());

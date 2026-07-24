@@ -57,38 +57,47 @@ async function scrapeMdeRegistration(property) {
     const page = await browser.newPage();
     page.setDefaultTimeout(30000);
 
-    await page.goto('https://mdolrr.mde.state.md.us/CustomPages/PublicOLRRSearch.aspx', {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
-    });
+    // Try progressively looser search inputs until something matches
+    const variants = [];
+    variants.push({ dir: parsed.dir, name: parsed.name });
+    if (parsed.dir) variants.push({ dir: '', name: parsed.name });
+    const firstWord = parsed.name.split(' ')[0];
+    if (firstWord !== parsed.name) variants.push({ dir: parsed.dir, name: firstWord });
 
-    await page.fill('#ucpublicSearch1_txtAddressNo', parsed.number);
-    await page.fill('#ucpublicSearch1_txtStreetName', parsed.name);
-    if (parsed.dir) {
-      const d = parsed.dir[0]; // dropdown uses single letters E/W/N/S
-      await page.selectOption('#ucpublicSearch1_ddlAddresPrefix', d).catch(() => {});
-    }
-    await page.selectOption('#ucpublicSearch1_ddlCounty', countyVal);
-    await page.click('#ucpublicSearch1_btnPublicSearch');
-
-    // Wait until either a data row (numeric tracking ID) or a no-records message appears
-    await page.waitForFunction(() => {
-      const txt = document.body.innerText.toLowerCase();
-      if (txt.includes('no records') || txt.includes('no results')) return true;
-      return [...document.querySelectorAll('table tr')].some(tr => {
-        const tds = [...tr.querySelectorAll('td')].map(td => td.innerText.trim());
-        return tds.length === 6 && /^\d+$/.test(tds[0]) && tds[4].includes('/');
+    let dataRows = [];
+    for (const v of variants) {
+      await page.goto('https://mdolrr.mde.state.md.us/CustomPages/PublicOLRRSearch.aspx', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
       });
-    }, { timeout: 20000 }).catch(() => {});
 
-    const rows = await page.$$eval('table tr', trs =>
-      trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
-    );
+      await page.fill('#ucpublicSearch1_txtAddressNo', parsed.number);
+      await page.fill('#ucpublicSearch1_txtStreetName', v.name);
+      if (v.dir) {
+        await page.selectOption('#ucpublicSearch1_ddlAddresPrefix', v.dir[0]).catch(() => {});
+      }
+      await page.selectOption('#ucpublicSearch1_ddlCounty', countyVal);
+      await page.click('#ucpublicSearch1_btnPublicSearch');
 
-    const dataRows = rows.filter(cells =>
-      cells.length === 6 && /^\d+$/.test(cells[0]) && cells[4].includes('/')
-    );
-    console.log(`[mde-olrr] ${parsed.number} ${parsed.name}: ${dataRows.length} registration rows`);
+      // Wait until either a data row (numeric tracking ID) or a no-records message appears
+      await page.waitForFunction(() => {
+        const txt = document.body.innerText.toLowerCase();
+        if (txt.includes('no records') || txt.includes('no results')) return true;
+        return [...document.querySelectorAll('table tr')].some(tr => {
+          const tds = [...tr.querySelectorAll('td')].map(td => td.innerText.trim());
+          return tds.length === 6 && /^\d+$/.test(tds[0]) && tds[4].includes('/');
+        });
+      }, { timeout: 20000 }).catch(() => {});
+
+      const rows = await page.$$eval('table tr', trs =>
+        trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
+      );
+      dataRows = rows.filter(cells =>
+        cells.length === 6 && /^\d+$/.test(cells[0]) && cells[4].includes('/')
+      );
+      console.log(`[mde-olrr] ${parsed.number} dir='${v.dir}' name='${v.name}': ${dataRows.length} rows`);
+      if (dataRows.length > 0) break;
+    }
 
     if (dataRows.length > 0) {
       // Prefer Active rows, then most recent registration date
@@ -179,35 +188,44 @@ async function scrapeMdeCertificate(property) {
     const page = await browser.newPage();
     page.setDefaultTimeout(30000);
 
-    await page.goto('https://mde-lrca.maryland.gov/Certificates.aspx', {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
-    });
+    // Try progressively looser street names until something matches
+    const nameVariants = [parsed.name];
+    const firstWord = parsed.name.split(' ')[0];
+    if (firstWord !== parsed.name) nameVariants.push(firstWord);
+    if (parsed.dir) nameVariants.push(`${parsed.dir[0]} ${parsed.name}`);
 
-    await page.fill('#txtHomeAddressNumber', parsed.number);
-    await page.fill('#txtHomeStreetName', parsed.name);
-    await page.selectOption('#ddlHomeCounty', countyVal);
-    await page.click('#btnHomeSearchProperty');
-
-    // Wait until either a data row (numeric cert number at col 7) or a no-records message appears
-    await page.waitForFunction(() => {
-      const txt = document.body.innerText.toLowerCase();
-      if (txt.includes('no property records') || txt.includes('no records')) return true;
-      return [...document.querySelectorAll('table tr')].some(tr => {
-        const tds = [...tr.querySelectorAll('td')].map(td => td.innerText.trim());
-        return tds.length >= 9 && /^\d+$/.test(tds[7]);
+    let dataRows = [];
+    for (const name of nameVariants) {
+      await page.goto('https://mde-lrca.maryland.gov/Certificates.aspx', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
       });
-    }, { timeout: 20000 }).catch(() => {});
 
-    // Columns: Address, Unit, Owner/Manager, County, Property#, Parcel, Inspection Date, Cert#, Cert Status, ...
-    const rows = await page.$$eval('table tr', trs =>
-      trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
-    );
+      await page.fill('#txtHomeAddressNumber', parsed.number);
+      await page.fill('#txtHomeStreetName', name);
+      await page.selectOption('#ddlHomeCounty', countyVal);
+      await page.click('#btnHomeSearchProperty');
 
-    const dataRows = rows.filter(cells =>
-      cells.length >= 9 && cells[7] && /^\d+$/.test(cells[7])
-    );
-    console.log(`[mde-lrca] ${parsed.number} ${parsed.name}: ${dataRows.length} certificate rows`);
+      // Wait until either a data row (numeric cert number at col 7) or a no-records message appears
+      await page.waitForFunction(() => {
+        const txt = document.body.innerText.toLowerCase();
+        if (txt.includes('no property records') || txt.includes('no records')) return true;
+        return [...document.querySelectorAll('table tr')].some(tr => {
+          const tds = [...tr.querySelectorAll('td')].map(td => td.innerText.trim());
+          return tds.length >= 9 && /^\d+$/.test(tds[7]);
+        });
+      }, { timeout: 20000 }).catch(() => {});
+
+      // Columns: Address, Unit, Owner/Manager, County, Property#, Parcel, Inspection Date, Cert#, Cert Status, ...
+      const rows = await page.$$eval('table tr', trs =>
+        trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()))
+      );
+      dataRows = rows.filter(cells =>
+        cells.length >= 9 && cells[7] && /^\d+$/.test(cells[7])
+      );
+      console.log(`[mde-lrca] ${parsed.number} '${name}': ${dataRows.length} certificate rows`);
+      if (dataRows.length > 0) break;
+    }
 
     if (dataRows.length > 0) {
       const parseUs = d => { const m = (d || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(`${m[3]}-${m[1]}-${m[2]}`).getTime() : 0; };

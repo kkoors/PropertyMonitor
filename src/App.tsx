@@ -54,6 +54,15 @@ export default function App() {
       }
       if (s.sidebar_color) root.style.setProperty('--sidebar-bg', s.sidebar_color)
       else root.style.removeProperty('--sidebar-bg')
+      if (s.logo) {
+        let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+        if (!link) {
+          link = document.createElement('link')
+          link.rel = 'icon'
+          document.head.appendChild(link)
+        }
+        link.href = s.logo
+      }
     } catch { /* keep defaults */ }
   }
 
