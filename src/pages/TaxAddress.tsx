@@ -69,7 +69,17 @@ export default function TaxAddress({ onEditProperty }: { onEditProperty?: (id: n
                   </button>
                   <div style={{ fontSize: 12, color: '#6b7280', paddingLeft: 6, cursor: 'pointer' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">{r.address}</div>
                 </td>
-                <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{r.tax_id || <span style={{color:'#9ca3af'}}>—</span>}</td>
+                <td style={{ fontFamily: 'monospace', fontSize: 13, whiteSpace: 'nowrap' }}>
+                  {r.tax_id ? (<>
+                    {r.tax_id}
+                    {r.tax_id.length >= 8 && (
+                      <a
+                        href={`https://sdat.dat.maryland.gov/RealProperty/Pages/viewdetails.aspx?County=${r.tax_id.slice(0, 2)}&SearchType=ACCT&District=${r.tax_id.slice(2, 4)}&AccountNumber=${r.tax_id.slice(4)}`}
+                        target="_blank" rel="noreferrer" title="Open authoritative SDAT record" style={{ marginLeft: 6 }}
+                      >↗</a>
+                    )}
+                  </>) : <span style={{color:'#9ca3af'}}>—</span>}
+                </td>
                 <td style={{ fontSize: 13 }}>{r.owner_address || <span style={{color:'#9ca3af'}}>none on file</span>}</td>
                 <td style={{ fontSize: 13 }}>{r.sdat_mailing_address || <span style={{color:'#9ca3af'}}>—</span>}</td>
                 <td style={{ background: FLAG_BG[r.flag.status], color: FLAG_TEXT[r.flag.status], fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>
