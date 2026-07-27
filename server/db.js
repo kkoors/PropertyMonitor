@@ -175,6 +175,11 @@ function initSchema(db) {
   if (!ownerCols.includes('opengov_location_id')) db.prepare(`ALTER TABLE properties ADD COLUMN opengov_location_id TEXT`).run();
 
   db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
+  // OpenGov applicant account whose records map addresses -> DHCD location IDs
+  if (!db.prepare(`SELECT value FROM settings WHERE key = 'opengov_user_id'`).get()) {
+    db.prepare(`INSERT INTO settings (key, value) VALUES ('opengov_user_id', ?)`)
+      .run('auth0|63daa8e72dc7c91ce552f2e3');
+  }
   if (!leadCols.includes('unit')) db.prepare(`ALTER TABLE lead_records ADD COLUMN unit TEXT`).run();
   if (!leadCols.includes('cert_pdf')) db.prepare(`ALTER TABLE lead_records ADD COLUMN cert_pdf BLOB`).run();
 

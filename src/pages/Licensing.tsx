@@ -12,6 +12,8 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
   const [rows, setRows] = useState<any[]>([])
   const [checking, setChecking] = useState<number | null>(null)
   const [checkingAll, setCheckingAll] = useState(false)
+  const [discovering, setDiscovering] = useState(false)
+  const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const { search, setSearch, Th, apply } = useTableSort('licensing', 'name')
 
@@ -40,6 +42,22 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
     } finally { setCheckingAll(false) }
   }
 
+  // Matches Baltimore City properties to their DHCD (OpenGov) location IDs so
+  // license checks read the live system instead of the lagging GIS extract.
+  async function discoverIds() {
+    setDiscovering(true); setError(''); setNotice('')
+    try {
+      const res = await fetch('/api/compliance/opengov-discover', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error || 'Discovery failed'); return }
+      const missed = data.unmatched?.length
+        ? ` ${data.unmatched.length} not found in DHCD: ${data.unmatched.map((u: any) => u.name).join(', ')}`
+        : ''
+      setNotice(`Linked ${data.matched.length} propert${data.matched.length === 1 ? 'y' : 'ies'} to DHCD records.${missed}`)
+      await load()
+    } catch (e: any) { setError(e.message) } finally { setDiscovering(false) }
+  }
+
   const monitored = apply(
     rows.filter(r => !r.commercial && !r.license_not_monitored && (r.municipality === 'baltimore_city' || r.municipality === 'baltimore_county')),
     r => [r.name, r.address, r.municipality, r.license_number, r.status],
@@ -50,10 +68,15 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
       <div className="toolbar">
         <h1>Rental Licensing</h1>
         <input className="filter" style={{ minWidth: 180 }} placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
+        <button className="btn btn-ghost" onClick={discoverIds} disabled={discovering}
+          title="Match Baltimore City properties to their DHCD portal records automatically">
+          {discovering ? 'Linking…' : '🔗 Link DHCD Records'}
+        </button>
         <button className="btn btn-primary" onClick={checkAll} disabled={checkingAll}>
           {checkingAll ? 'Checking…' : '⟳ Check All'}
         </button>
       </div>
+      {notice && <div className="card" style={{ color: '#166534', fontSize: 13 }}>{notice}</div>}
       {error && <div className="card" style={{ color: '#991b1b', fontSize: 13 }}>{error}</div>}
       <div className="card" style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', minWidth: 'max-content' }}>

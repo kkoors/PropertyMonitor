@@ -1,7 +1,7 @@
 'use strict';
 const { Router } = require('express');
 
-const ALLOWED_KEYS = new Set(['app_name', 'primary_color', 'sidebar_color', 'logo']);
+const ALLOWED_KEYS = new Set(['app_name', 'primary_color', 'sidebar_color', 'logo', 'opengov_user_id']);
 
 module.exports = function makeSettingsRouter(db) {
   const router = Router();

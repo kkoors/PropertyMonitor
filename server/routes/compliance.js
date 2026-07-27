@@ -4,6 +4,7 @@ const { lookupSdat, lookupSdatMailing } = require('../scrapers/sdat');
 const { scrapeRentalLicenseBaltimoreCounty } = require('../scrapers/rentalLicenseBaltimoreCounty');
 const { scrapeRentalLicenseBaltimoreCity } = require('../scrapers/rentalLicenseBaltimoreCity');
 const { scrapeMdeRegistration, scrapeMdeCertificate } = require('../scrapers/mde');
+const { harvestOpenGovLocations, keyFromAddress } = require('../scrapers/opengovLocations');
 
 const DAYS = ms => Math.round(ms / 86400000);
 
@@ -306,14 +307,70 @@ module.exports = function makeComplianceRouter(db) {
     if (!property) return res.status(404).json({ error: 'Not found' });
     if (property.municipality !== 'baltimore_city') return res.status(400).json({ error: 'Not a Baltimore City property' });
 
+    // No location ID yet? Try to discover it so this check uses the live API.
+    if (!property.opengov_location_id) {
+      try {
+        await discoverOpenGovIds();
+        const fresh = db.prepare(`SELECT opengov_location_id FROM properties WHERE id = ?`).get(property.id);
+        if (fresh) property.opengov_location_id = fresh.opengov_location_id;
+      } catch (err) {
+        console.log(`[opengov] discovery failed for ${property.name}: ${err.message}`);
+      }
+    }
+
     const result = await scrapeRentalLicenseBaltimoreCity(property);
     if (result.error) return res.status(422).json({ error: result.error });
     storeCityResult(property.id, result);
     res.json(result);
   });
 
+  // Fill in Baltimore City OpenGov location IDs automatically by matching the
+  // addresses on records filed under our OpenGov account. Safe to re-run: it
+  // only fills blanks unless ?force=1.
+  async function discoverOpenGovIds({ force = false } = {}) {
+    const setting = db.prepare(`SELECT value FROM settings WHERE key = 'opengov_user_id'`).get();
+    const userId = setting && setting.value;
+    if (!userId) return { error: 'No OpenGov account ID saved yet (Admin → OpenGov Account ID)' };
+
+    const locations = await harvestOpenGovLocations(userId);
+    const byKey = new Map();
+    for (const loc of locations) if (loc.key && !byKey.has(loc.key)) byKey.set(loc.key, loc);
+
+    const targets = db.prepare(
+      `SELECT id, name, address, opengov_location_id FROM properties
+        WHERE active = 1 AND municipality = 'baltimore_city'`
+    ).all();
+
+    const matched = [], unmatched = [];
+    for (const p of targets) {
+      if (p.opengov_location_id && !force) continue;
+      const hit = byKey.get(keyFromAddress(p.address));
+      if (!hit) { unmatched.push({ id: p.id, name: p.name, address: p.address }); continue; }
+      db.prepare(`UPDATE properties SET opengov_location_id = ? WHERE id = ?`)
+        .run(String(hit.locationID), p.id);
+      matched.push({ id: p.id, name: p.name, locationID: hit.locationID });
+    }
+    console.log(`[opengov] discovery: ${locations.length} locations, ${matched.length} matched, ${unmatched.length} unmatched`);
+    return { locations: locations.length, matched, unmatched };
+  }
+
+  router.post('/opengov-discover', async (req, res) => {
+    try {
+      const out = await discoverOpenGovIds({ force: req.query.force === '1' });
+      if (out.error) return res.status(400).json(out);
+      res.json(out);
+    } catch (err) {
+      res.status(422).json({ error: err.message });
+    }
+  });
+
   // Bulk: update all rental licenses (Baltimore City + County)
   router.post('/update-all-licenses', async (req, res) => {
+    // Self-heal: pick up location IDs for any city property still missing one
+    // so the live OpenGov API is used instead of the stale GIS extract.
+    try { await discoverOpenGovIds(); } catch (err) {
+      console.log(`[opengov] discovery skipped: ${err.message}`);
+    }
     const properties = db.prepare(`SELECT * FROM properties WHERE active = 1 AND municipality IN ('baltimore_county', 'baltimore_city')`).all();
     const results = [];
     for (const property of properties) {
