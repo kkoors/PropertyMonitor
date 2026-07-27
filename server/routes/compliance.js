@@ -93,6 +93,7 @@ function registrationStatus(registrations) {
     return { status: 'green', label: 'Registered' };
   }
   if (r.status === 'expired') return { status: 'red', label: `Reg expired ${r.exp_date || ''}` };
+  if (r.status === 'not_found') return { status: 'red', label: 'No registration found' };
   return { status: 'yellow', label: r.status };
 }
 
@@ -254,7 +255,15 @@ module.exports = function makeComplianceRouter(db) {
   function storeCityResult(propertyId, result) {
     if (result.license) upsertLicense(propertyId, 'baltimore_city', result.license, 'rental_license');
     else upsertLicense(propertyId, 'baltimore_city', { license_number: result.license_number, status: result.status, issue_date: result.issue_date, exp_date: result.exp_date }, 'rental_license');
-    if (result.registration) upsertLicense(propertyId, 'baltimore_city', result.registration, 'registration');
+    // Always write a registration row. Without this a property with no
+    // registration on file keeps reading "never checked" after every check,
+    // which is indistinguishable from never having run one.
+    upsertLicense(
+      propertyId,
+      'baltimore_city',
+      result.registration || { license_number: null, status: 'not_found', issue_date: null, exp_date: null },
+      'registration',
+    );
   }
 
   // County scrapes return { licenses: [per-unit rows] } — replace all unit rows
