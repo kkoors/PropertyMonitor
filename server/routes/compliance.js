@@ -238,14 +238,14 @@ module.exports = function makeComplianceRouter(db) {
     const existing = db.prepare(`SELECT id FROM rental_licenses WHERE property_id = ? AND municipality = ? AND license_type = ?`).get(propertyId, municipality, licenseType);
     if (existing) {
       const stmt = letter
-        ? db.prepare(`UPDATE rental_licenses SET license_number=?, status=?, issue_date=?, exp_date=?, confirmation_letter=?, scraped_at=datetime('now') WHERE id=?`)
-        : db.prepare(`UPDATE rental_licenses SET license_number=?, status=?, issue_date=?, exp_date=?, scraped_at=datetime('now') WHERE id=?`);
+        ? db.prepare(`UPDATE rental_licenses SET license_number=?, status=?, issue_date=?, exp_date=?, notes=?, confirmation_letter=?, scraped_at=datetime('now') WHERE id=?`)
+        : db.prepare(`UPDATE rental_licenses SET license_number=?, status=?, issue_date=?, exp_date=?, notes=?, scraped_at=datetime('now') WHERE id=?`);
       letter
-        ? stmt.run(result.license_number, result.status, result.issue_date || null, result.exp_date || null, letter, existing.id)
-        : stmt.run(result.license_number, result.status, result.issue_date || null, result.exp_date || null, existing.id);
+        ? stmt.run(result.license_number, result.status, result.issue_date || null, result.exp_date || null, result.notes || null, letter, existing.id)
+        : stmt.run(result.license_number, result.status, result.issue_date || null, result.exp_date || null, result.notes || null, existing.id);
     } else {
-      db.prepare(`INSERT INTO rental_licenses (property_id, municipality, license_type, license_number, status, issue_date, exp_date, confirmation_letter, scraped_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'))`)
-        .run(propertyId, municipality, licenseType, result.license_number, result.status, result.issue_date || null, result.exp_date || null, letter);
+      db.prepare(`INSERT INTO rental_licenses (property_id, municipality, license_type, license_number, status, issue_date, exp_date, notes, confirmation_letter, scraped_at) VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))`)
+        .run(propertyId, municipality, licenseType, result.license_number, result.status, result.issue_date || null, result.exp_date || null, result.notes || null, letter);
     }
   }
 
@@ -392,8 +392,8 @@ module.exports = function makeComplianceRouter(db) {
   router.get('/licenses', (req, res) => {
     const props = db.prepare(`SELECT id, name, address, municipality, commercial, license_not_monitored FROM properties WHERE active = 1 ORDER BY name`).all();
     const rows = props.map(p => {
-      const licenses = db.prepare(`SELECT unit, license_number, status, issue_date, exp_date, scraped_at, (confirmation_letter IS NOT NULL) as has_letter FROM rental_licenses WHERE property_id = ? AND municipality = ? AND license_type = 'rental_license' ORDER BY unit`).all(p.id, p.municipality);
-      const reg = db.prepare(`SELECT license_number, status, exp_date FROM rental_licenses WHERE property_id = ? AND municipality = ? AND license_type = 'registration'`).get(p.id, p.municipality);
+      const licenses = db.prepare(`SELECT unit, license_number, status, issue_date, exp_date, notes, scraped_at, (confirmation_letter IS NOT NULL) as has_letter FROM rental_licenses WHERE property_id = ? AND municipality = ? AND license_type = 'rental_license' ORDER BY unit`).all(p.id, p.municipality);
+      const reg = db.prepare(`SELECT license_number, status, exp_date, notes FROM rental_licenses WHERE property_id = ? AND municipality = ? AND license_type = 'registration'`).get(p.id, p.municipality);
       const first = licenses[0] || {};
       return {
         ...p,
@@ -410,6 +410,8 @@ module.exports = function makeComplianceRouter(db) {
         reg_number: reg?.license_number || null,
         reg_status: reg?.status || null,
         reg_exp_date: reg?.exp_date || null,
+        reg_url: reg?.notes?.startsWith('http') ? reg.notes : null,
+        license_url: licenses[0]?.notes?.startsWith('http') ? licenses[0].notes : null,
       };
     });
     res.json(rows);

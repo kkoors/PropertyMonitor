@@ -85,6 +85,9 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
                     <td style={{ fontFamily: 'monospace', fontSize: 13, whiteSpace: 'nowrap' }}>
                       {span > 1 && <span style={{ fontFamily: 'inherit', fontWeight: 700, marginRight: 6 }}>Unit {l.unit || '?'}</span>}
                       {lic.license_number || <span style={{color:'#9ca3af'}}>—</span>}
+                      {(lic.notes || r.license_url)?.startsWith?.('http') && (
+                        <a href={lic.notes || r.license_url} target="_blank" rel="noreferrer" title="Open DHCD portal record" style={{ marginLeft: 5 }}>↗</a>
+                      )}
                     </td>
                     <td style={{ background: STATUS_BG[lic.status] || '#f3f4f6', color: STATUS_TEXT[lic.status] || '#6b7280', fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>
                       {lic.status ? String(lic.status).replace('_', ' ') : 'never checked'}
@@ -99,7 +102,12 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
                       }}>
                         {r.municipality === 'baltimore_city' ? (r.reg_status ? r.reg_status.replace('_', ' ') : 'never checked') : 'n/a'}
                       </td>
-                      <td rowSpan={span}>{r.municipality === 'baltimore_city' ? (r.reg_exp_date || <span style={{color:'#9ca3af'}}>—</span>) : <span style={{color:'#9ca3af'}}>—</span>}</td>
+                      <td rowSpan={span}>
+                        {r.municipality === 'baltimore_city' ? (<>
+                          {r.reg_exp_date || <span style={{color:'#9ca3af'}}>—</span>}
+                          {r.reg_url && <a href={r.reg_url} target="_blank" rel="noreferrer" title="Open DHCD portal record" style={{ marginLeft: 5 }}>↗</a>}
+                        </>) : <span style={{color:'#9ca3af'}}>—</span>}
+                      </td>
                       <td rowSpan={span}>{r.has_letter ? <a href={`/api/compliance/rental-license/letter/${r.id}/${r.municipality}`} target="_blank" rel="noreferrer">📄</a> : <span style={{color:'#9ca3af'}}>—</span>}</td>
                       <td rowSpan={span} style={{ fontSize: 12, color: '#6b7280' }}>{r.scraped_at ? r.scraped_at.slice(0, 10) : '—'}</td>
                       <td rowSpan={span} style={{ whiteSpace: 'nowrap' }}>

@@ -172,6 +172,7 @@ function initSchema(db) {
   if (!ownerCols.includes('sdat_mailing_address')) db.prepare(`ALTER TABLE properties ADD COLUMN sdat_mailing_address TEXT`).run();
   if (!ownerCols.includes('sdat_checked_at')) db.prepare(`ALTER TABLE properties ADD COLUMN sdat_checked_at TEXT`).run();
   if (!ownerCols.includes('hidden_lead_units')) db.prepare(`ALTER TABLE properties ADD COLUMN hidden_lead_units TEXT`).run();
+  if (!ownerCols.includes('opengov_location_id')) db.prepare(`ALTER TABLE properties ADD COLUMN opengov_location_id TEXT`).run();
 
   db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
   if (!leadCols.includes('unit')) db.prepare(`ALTER TABLE lead_records ADD COLUMN unit TEXT`).run();

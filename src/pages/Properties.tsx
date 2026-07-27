@@ -9,7 +9,7 @@ const MUNICIPALITIES = [
   { value: 'harford', label: 'Harford County' },
 ]
 
-const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '', owner_name: '', owner_address: '', commercial: false, multifamily: false, lead_not_monitored: false, license_not_monitored: false, tax_id: '', water_mailing_address: '' }
+const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '', owner_name: '', owner_address: '', commercial: false, multifamily: false, lead_not_monitored: false, license_not_monitored: false, tax_id: '', water_mailing_address: '', opengov_location_id: '' }
 
 interface Props {
   editPropertyId?: number | null
@@ -65,6 +65,7 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
       license_not_monitored: form.license_not_monitored ? 1 : 0,
       tax_id: form.tax_id || null,
       water_mailing_address: form.water_mailing_address || null,
+      opengov_location_id: form.opengov_location_id || null,
       owner_name: form.owner_name || null,
       owner_address: form.owner_address || null,
       lead_free_cert_date: form.lead_free_cert_date || null,
@@ -78,7 +79,7 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
   }
 
   function startEdit(p: any) {
-    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '', owner_name: p.owner_name || '', owner_address: p.owner_address || '', commercial: !!p.commercial, multifamily: !!p.multifamily, lead_not_monitored: !!p.lead_not_monitored, license_not_monitored: !!p.license_not_monitored, tax_id: p.tax_id || '', water_mailing_address: p.water_mailing_address || '' })
+    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '', owner_name: p.owner_name || '', owner_address: p.owner_address || '', commercial: !!p.commercial, multifamily: !!p.multifamily, lead_not_monitored: !!p.lead_not_monitored, license_not_monitored: !!p.license_not_monitored, tax_id: p.tax_id || '', water_mailing_address: p.water_mailing_address || '', opengov_location_id: p.opengov_location_id || '' })
     setEditId(p.id)
     setShowForm(true)
   }
@@ -278,6 +279,13 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
               <label>Water Bill Mailing Address</label>
               <input value={form.water_mailing_address} onChange={e => setForm(f => ({ ...f, water_mailing_address: e.target.value }))} placeholder="Where the water bill is mailed" />
             </div>
+            {form.municipality === 'baltimore_city' && (
+              <div className="form-group full-col">
+                <label>OpenGov Location (Baltimore City DHCD)</label>
+                <input value={form.opengov_location_id} onChange={e => setForm(f => ({ ...f, opengov_location_id: e.target.value }))} placeholder="Paste portal URL, e.g. https://baltimoremddhcd.portal.opengov.com/locations/452886" />
+                <span style={{ fontSize: 11, color: '#9ca3af' }}>Enables live license/registration data straight from DHCD's system instead of the daily GIS extract</span>
+              </div>
+            )}
             <div className="form-group">
               <label>Notes</label>
               <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
