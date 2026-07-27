@@ -4,9 +4,13 @@ const { lookupSdat, lookupSdatMailing } = require('../scrapers/sdat');
 const { scrapeRentalLicenseBaltimoreCounty } = require('../scrapers/rentalLicenseBaltimoreCounty');
 const { scrapeRentalLicenseBaltimoreCity } = require('../scrapers/rentalLicenseBaltimoreCity');
 const { scrapeMdeRegistration, scrapeMdeCertificate } = require('../scrapers/mde');
-const { harvestOpenGovLocations, keyFromAddress } = require('../scrapers/opengovLocations');
+const { harvestOpenGovLocations, keyFromAddress, resolveLocationIdByAddress } = require('../scrapers/opengovLocations');
 
 const DAYS = ms => Math.round(ms / 86400000);
+
+// Express 4 does not catch rejections from async handlers, so a scraper that
+// throws (a timed-out fetch, say) would take the whole server down mid-run.
+const aw = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 function normalizeUsDate(val) {
   if (!val) return null;
@@ -220,7 +224,7 @@ module.exports = function makeComplianceRouter(db) {
   });
 
   // Trigger SDAT lookup for a property
-  router.post('/sdat/:propertyId', async (req, res) => {
+  router.post('/sdat/:propertyId', aw(async (req, res) => {
     const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);
     if (!property) return res.status(404).json({ error: 'Not found' });
 
@@ -232,7 +236,7 @@ module.exports = function makeComplianceRouter(db) {
         .run(result.year_built, result.sdat_acct || property.sdat_acct, property.id);
     }
     res.json(result);
-  });
+  }));
 
   // Helper to upsert a rental license/registration result (including optional confirmation_letter blob)
   function upsertLicense(propertyId, municipality, result, licenseType = 'rental_license') {
@@ -289,7 +293,7 @@ module.exports = function makeComplianceRouter(db) {
   });
 
   // Trigger Baltimore County rental license check
-  router.post('/rental-license/county/:propertyId', async (req, res) => {
+  router.post('/rental-license/county/:propertyId', aw(async (req, res) => {
     const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);
     if (!property) return res.status(404).json({ error: 'Not found' });
     if (property.municipality !== 'baltimore_county') return res.status(400).json({ error: 'Not a Baltimore County property' });
@@ -298,20 +302,20 @@ module.exports = function makeComplianceRouter(db) {
     if (result.error) return res.status(422).json({ error: result.error });
     storeCountyResult(property.id, result);
     res.json(result);
-  });
+  }));
 
   // Keep old path working
-  router.post('/rental-license/baltimore-county/:propertyId', async (req, res) => {
+  router.post('/rental-license/baltimore-county/:propertyId', aw(async (req, res) => {
     const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);
     if (!property) return res.status(404).json({ error: 'Not found' });
     const result = await scrapeRentalLicenseBaltimoreCounty(property);
     if (result.error) return res.status(422).json({ error: result.error });
     storeCountyResult(property.id, result);
     res.json(result);
-  });
+  }));
 
   // Trigger Baltimore City rental license check
-  router.post('/rental-license/city/:propertyId', async (req, res) => {
+  router.post('/rental-license/city/:propertyId', aw(async (req, res) => {
     const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);
     if (!property) return res.status(404).json({ error: 'Not found' });
     if (property.municipality !== 'baltimore_city') return res.status(400).json({ error: 'Not a Baltimore City property' });
@@ -331,39 +335,71 @@ module.exports = function makeComplianceRouter(db) {
     if (result.error) return res.status(422).json({ error: result.error });
     storeCityResult(property.id, result);
     res.json(result);
-  });
+  }));
 
   // Fill in Baltimore City OpenGov location IDs automatically by matching the
   // addresses on records filed under our OpenGov account. Safe to re-run: it
   // only fills blanks unless ?force=1.
   async function discoverOpenGovIds({ force = false } = {}) {
-    const setting = db.prepare(`SELECT value FROM settings WHERE key = 'opengov_user_id'`).get();
-    const userId = setting && setting.value;
-    if (!userId) return { error: 'No OpenGov account ID saved yet (Admin → OpenGov Account ID)' };
-
-    const locations = await harvestOpenGovLocations(userId);
-    const byKey = new Map();
-    for (const loc of locations) if (loc.key && !byKey.has(loc.key)) byKey.set(loc.key, loc);
-
     const targets = db.prepare(
       `SELECT id, name, address, opengov_location_id FROM properties
         WHERE active = 1 AND municipality = 'baltimore_city'`
     ).all();
+    const pending = targets.filter(p => force || !p.opengov_location_id);
+    if (!pending.length) return { matched: [], unmatched: [], locations: 0 };
 
     const matched = [], unmatched = [];
-    for (const p of targets) {
-      if (p.opengov_location_id && !force) continue;
-      const hit = byKey.get(keyFromAddress(p.address));
-      if (!hit) { unmatched.push({ id: p.id, name: p.name, address: p.address }); continue; }
-      db.prepare(`UPDATE properties SET opengov_location_id = ? WHERE id = ?`)
-        .run(String(hit.locationID), p.id);
-      matched.push({ id: p.id, name: p.name, locationID: hit.locationID });
+    let byKey = null;   // account harvest, only built if the public lookup misses
+
+    for (const p of pending) {
+      // Public path: city parcel data gives the ZIP+4 the locations endpoint
+      // needs. Works for any address, whoever filed the records.
+      let locationID = null, needsUnit = null;
+      try {
+        const hit = await resolveLocationIdByAddress(p.address);
+        if (hit && hit.needsUnit) needsUnit = hit.units;
+        else if (hit) locationID = hit.locationID;
+      } catch (err) {
+        console.log(`[opengov] address lookup failed for ${p.name}: ${err.message}`);
+      }
+
+      // Fallback: records filed under our own OpenGov account — which also
+      // pins down the right unit when the address doesn't name one.
+      if (!locationID) {
+        if (byKey === null) {
+          byKey = new Map();
+          const setting = db.prepare(`SELECT value FROM settings WHERE key = 'opengov_user_id'`).get();
+          if (setting && setting.value) {
+            try {
+              for (const loc of await harvestOpenGovLocations(setting.value)) {
+                if (loc.key && !byKey.has(loc.key)) byKey.set(loc.key, loc);
+              }
+            } catch (err) {
+              console.log(`[opengov] account harvest failed: ${err.message}`);
+            }
+          }
+        }
+        const hit = byKey.get(keyFromAddress(p.address));
+        if (hit) locationID = hit.locationID;
+      }
+
+      if (!locationID) {
+        const reason = needsUnit
+          ? `DHCD lists only units at this address (${needsUnit.slice(0, 6).join(', ')}) — add the unit number to the address`
+          : 'no DHCD record found for this address';
+        console.log(`[opengov] ${p.name}: ${reason}`);
+        unmatched.push({ id: p.id, name: p.name, address: p.address, reason });
+        continue;
+      }
+      db.prepare(`UPDATE properties SET opengov_location_id = ? WHERE id = ?`).run(String(locationID), p.id);
+      matched.push({ id: p.id, name: p.name, locationID });
     }
-    console.log(`[opengov] discovery: ${locations.length} locations, ${matched.length} matched, ${unmatched.length} unmatched`);
-    return { locations: locations.length, matched, unmatched };
+
+    console.log(`[opengov] discovery: ${matched.length} matched, ${unmatched.length} unmatched (of ${pending.length} checked)`);
+    return { locations: matched.length, matched, unmatched };
   }
 
-  router.post('/opengov-discover', async (req, res) => {
+  router.post('/opengov-discover', aw(async (req, res) => {
     try {
       const out = await discoverOpenGovIds({ force: req.query.force === '1' });
       if (out.error) return res.status(400).json(out);
@@ -371,10 +407,10 @@ module.exports = function makeComplianceRouter(db) {
     } catch (err) {
       res.status(422).json({ error: err.message });
     }
-  });
+  }));
 
   // Bulk: update all rental licenses (Baltimore City + County)
-  router.post('/update-all-licenses', async (req, res) => {
+  router.post('/update-all-licenses', aw(async (req, res) => {
     // Self-heal: pick up location IDs for any city property still missing one
     // so the live OpenGov API is used instead of the stale GIS extract.
     try { await discoverOpenGovIds(); } catch (err) {
@@ -382,12 +418,19 @@ module.exports = function makeComplianceRouter(db) {
     }
     const properties = db.prepare(`SELECT * FROM properties WHERE active = 1 AND municipality IN ('baltimore_county', 'baltimore_city')`).all();
     const results = [];
+    let failed = 0;
     for (const property of properties) {
+      // One property's network hiccup must not abandon the rest of the run.
       let result;
-      if (property.municipality === 'baltimore_county') {
-        result = await scrapeRentalLicenseBaltimoreCounty(property);
-      } else {
-        result = await scrapeRentalLicenseBaltimoreCity(property);
+      try {
+        result = property.municipality === 'baltimore_county'
+          ? await scrapeRentalLicenseBaltimoreCounty(property)
+          : await scrapeRentalLicenseBaltimoreCity(property);
+      } catch (err) {
+        failed++;
+        console.log(`[licenses] ${property.name} failed: ${err.message}`);
+        results.push({ id: property.id, name: property.name, municipality: property.municipality, error: err.message });
+        continue;
       }
       if (!result.error) {
         if (property.municipality === 'baltimore_city') storeCityResult(property.id, result);
@@ -395,11 +438,11 @@ module.exports = function makeComplianceRouter(db) {
       }
       results.push({ id: property.id, name: property.name, municipality: property.municipality, ...result });
     }
-    res.json({ updated: results.length, results });
-  });
+    res.json({ updated: results.length - failed, failed, results });
+  }));
 
   // Trigger MDE lead registration + certificate check, persist to lead_records
-  router.post('/mde/:propertyId', async (req, res) => {
+  router.post('/mde/:propertyId', aw(async (req, res) => {
     const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);
     if (!property) return res.status(404).json({ error: 'Not found' });
 
@@ -452,7 +495,7 @@ module.exports = function makeComplianceRouter(db) {
     }
 
     res.json({ registration: reg, certificate: cert, saved: registered || certFound });
-  });
+  }));
 
   // ── Licensing dashboard ───────────────────────────────────────────────────
   router.get('/licenses', (req, res) => {
@@ -561,7 +604,7 @@ module.exports = function makeComplianceRouter(db) {
     res.json(props.map(p => ({ ...p, flag: taxAddressFlag(p) })));
   });
 
-  router.post('/tax-address/:propertyId', async (req, res) => {
+  router.post('/tax-address/:propertyId', aw(async (req, res) => {
     const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);
     if (!property) return res.status(404).json({ error: 'Not found' });
 
@@ -573,9 +616,9 @@ module.exports = function makeComplianceRouter(db) {
 
     const updated = db.prepare(`SELECT id, name, address, municipality, owner_name, owner_address, tax_id, sdat_mailing_address, sdat_checked_at FROM properties WHERE id = ?`).get(property.id);
     res.json({ ...updated, flag: taxAddressFlag(updated) });
-  });
+  }));
 
-  router.post('/tax-address-all', async (req, res) => {
+  router.post('/tax-address-all', aw(async (req, res) => {
     const props = db.prepare(`SELECT * FROM properties WHERE active = 1`).all();
     const results = [];
     for (const property of props) {
@@ -587,7 +630,7 @@ module.exports = function makeComplianceRouter(db) {
       results.push({ id: property.id, name: property.name, ...result });
     }
     res.json({ checked: results.length, results });
-  });
+  }));
 
   return router;
 };

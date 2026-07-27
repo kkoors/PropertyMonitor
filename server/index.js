@@ -52,6 +52,22 @@ async function start() {
     app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'dist', 'index.html')));
   }
 
+  // Any error thrown by a route lands here instead of killing the process.
+  app.use((err, req, res, next) => {
+    console.error(`[error] ${req.method} ${req.originalUrl}: ${err.stack || err.message}`);
+    if (res.headersSent) return next(err);
+    res.status(500).json({ error: err.message || 'Server error' });
+  });
+
+  // Last line of defence: a scraper's stray promise rejection used to take the
+  // whole server down mid-run, losing everything a long check had done.
+  process.on('unhandledRejection', err => {
+    console.error('[unhandledRejection]', err && (err.stack || err.message || err));
+  });
+  process.on('uncaughtException', err => {
+    console.error('[uncaughtException]', err && (err.stack || err.message || err));
+  });
+
   app.listen(PORT, () => console.log(`Water Bills server → http://localhost:${PORT}`));
 
   // Daily scrape at 7am
