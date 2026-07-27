@@ -13,6 +13,7 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
   const [checking, setChecking] = useState<number | null>(null)
   const [checkingAll, setCheckingAll] = useState(false)
   const [discovering, setDiscovering] = useState(false)
+  const [fetchingPdf, setFetchingPdf] = useState<number | null>(null)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const { search, setSearch, Th, apply } = useTableSort('licensing', 'name')
@@ -40,6 +41,20 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
       await fetch('/api/compliance/update-all-licenses', { method: 'POST' })
       await load()
     } finally { setCheckingAll(false) }
+  }
+
+  // Certificate PDFs come from the county's Accela portal, which is slow and
+  // often errors — so a routine check skips it and this fetches on request.
+  async function fetchLetter(r: any) {
+    setFetchingPdf(r.id); setError(''); setNotice('')
+    try {
+      const res = await fetch(`/api/compliance/rental-license/county/${r.id}?pdf=1`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) setError(data.error || 'Certificate fetch failed')
+      else if (data.pdf_error) setNotice(`${r.name}: ${data.pdf_error}`)
+      else setNotice(`${r.name}: certificate downloaded`)
+      await load()
+    } catch (e: any) { setError(e.message) } finally { setFetchingPdf(null) }
   }
 
   // Matches Baltimore City properties to their DHCD (OpenGov) location IDs so
@@ -131,7 +146,17 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
                           {r.reg_url && <a href={r.reg_url} target="_blank" rel="noreferrer" title="Open DHCD portal record" style={{ marginLeft: 5 }}>↗</a>}
                         </>) : <span style={{color:'#9ca3af'}}>—</span>}
                       </td>
-                      <td rowSpan={span}>{r.has_letter ? <a href={`/api/compliance/rental-license/letter/${r.id}/${r.municipality}`} target="_blank" rel="noreferrer">📄</a> : <span style={{color:'#9ca3af'}}>—</span>}</td>
+                      <td rowSpan={span}>
+                        {r.has_letter
+                          ? <a href={`/api/compliance/rental-license/letter/${r.id}/${r.municipality}`} target="_blank" rel="noreferrer">📄</a>
+                          : r.municipality === 'baltimore_county'
+                            ? <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '1px 5px' }}
+                                onClick={() => fetchLetter(r)} disabled={fetchingPdf === r.id}
+                                title="Download the certificate from the county portal (slow, often unavailable)">
+                                {fetchingPdf === r.id ? '⟳…' : 'get'}
+                              </button>
+                            : <span style={{color:'#9ca3af'}}>—</span>}
+                      </td>
                       <td rowSpan={span} style={{ fontSize: 12, color: '#6b7280' }}>{r.scraped_at ? r.scraped_at.slice(0, 10) : '—'}</td>
                       <td rowSpan={span} style={{ whiteSpace: 'nowrap' }}>
                         <button className="btn btn-primary btn-sm" onClick={() => check(r)} disabled={checking === r.id}>

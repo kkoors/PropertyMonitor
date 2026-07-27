@@ -46,7 +46,7 @@ function nameVariants(name) {
   return [...out];
 }
 
-async function scrapeRentalLicenseBaltimoreCounty(property) {
+async function scrapeRentalLicenseBaltimoreCounty(property, { downloadPdf = false } = {}) {
   const parsed = parseAddress(property.address);
   if (!parsed) return { error: `Could not parse address: ${property.address}` };
 
@@ -96,10 +96,13 @@ async function scrapeRentalLicenseBaltimoreCounty(property) {
     const best = licenses.find(l => l.status === 'active') || licenses[0];
     const result = { ...best, licenses };
 
-    // Try to download the license certificate PDF from the Accela citizen portal
-    if (best.license_number) {
+    // Fetching the certificate PDF spins up a headless browser against the
+    // Accela portal, which takes ~30s and usually returns an error page — far
+    // too slow to run on every check, so it happens only when asked for.
+    if (downloadPdf && best.license_number) {
       const pdf = await downloadLicensePdf(best.license_number);
       if (pdf) result.confirmation_letter = pdf;
+      else result.pdf_error = 'Certificate not available from the county portal';
     }
 
     return result;

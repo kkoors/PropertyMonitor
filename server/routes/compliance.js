@@ -273,10 +273,19 @@ module.exports = function makeComplianceRouter(db) {
   // County scrapes return { licenses: [per-unit rows] } — replace all unit rows
   function storeCountyResult(propertyId, result) {
     if (Array.isArray(result.licenses) && result.licenses.length > 0) {
+      // Rows are replaced wholesale, so carry a previously downloaded
+      // certificate across — a routine check no longer fetches one.
+      const existing = db.prepare(
+        `SELECT confirmation_letter FROM rental_licenses
+          WHERE property_id = ? AND municipality = 'baltimore_county'
+            AND license_type = 'rental_license' AND confirmation_letter IS NOT NULL LIMIT 1`
+      ).get(propertyId);
+      const letter = result.confirmation_letter || (existing && existing.confirmation_letter) || null;
+
       db.prepare(`DELETE FROM rental_licenses WHERE property_id = ? AND municipality = 'baltimore_county' AND license_type = 'rental_license'`).run(propertyId);
       const ins = db.prepare(`INSERT INTO rental_licenses (property_id, municipality, license_type, unit, license_number, status, issue_date, exp_date, confirmation_letter, scraped_at) VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))`);
       result.licenses.forEach((l, i) => {
-        ins.run(propertyId, 'baltimore_county', 'rental_license', l.unit || '', l.license_number, l.status, l.issue_date || null, l.exp_date || null, i === 0 ? (result.confirmation_letter || null) : null);
+        ins.run(propertyId, 'baltimore_county', 'rental_license', l.unit || '', l.license_number, l.status, l.issue_date || null, l.exp_date || null, i === 0 ? letter : null);
       });
     } else {
       upsertLicense(propertyId, 'baltimore_county', result);
@@ -298,7 +307,8 @@ module.exports = function makeComplianceRouter(db) {
     if (!property) return res.status(404).json({ error: 'Not found' });
     if (property.municipality !== 'baltimore_county') return res.status(400).json({ error: 'Not a Baltimore County property' });
 
-    const result = await scrapeRentalLicenseBaltimoreCounty(property);
+    // ?pdf=1 also pulls the certificate from the Accela portal (slow).
+    const result = await scrapeRentalLicenseBaltimoreCounty(property, { downloadPdf: req.query.pdf === '1' });
     if (result.error) return res.status(422).json({ error: result.error });
     storeCountyResult(property.id, result);
     res.json(result);
