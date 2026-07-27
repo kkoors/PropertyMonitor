@@ -30,11 +30,30 @@ function parseAddress(address) {
   return { number: match[1], name, dir, suffix };
 }
 
+// The county spells out "SAINT FABIAN" / "MOUNT ROYAL" where addresses are
+// usually abbreviated, so search every spelling of the name at once.
+function nameVariants(name) {
+  const out = new Set([name]);
+  const swap = (from, to) => {
+    if (name.startsWith(`${from} `)) out.add(`${to} ${name.slice(from.length + 1)}`);
+  };
+  swap('ST', 'SAINT'); swap('SAINT', 'ST');
+  swap('MT', 'MOUNT'); swap('MOUNT', 'MT');
+  swap('FT', 'FORT'); swap('FORT', 'FT');
+  for (const v of [...out]) {
+    if (v.includes("'")) out.add(v.replace(/'/g, ''));
+  }
+  return [...out];
+}
+
 async function scrapeRentalLicenseBaltimoreCounty(property) {
   const parsed = parseAddress(property.address);
   if (!parsed) return { error: `Could not parse address: ${property.address}` };
 
-  const where = `B1_HSE_NBR_START=${parsed.number} AND UPPER(B1_STR_NAME) LIKE '${parsed.name.replace(/'/g, "''")}%'`;
+  const nameClause = nameVariants(parsed.name)
+    .map(v => `UPPER(B1_STR_NAME) LIKE '${v.replace(/'/g, "''")}%'`)
+    .join(' OR ');
+  const where = `B1_HSE_NBR_START=${parsed.number} AND (${nameClause})`;
   const params = new URLSearchParams({
     where,
     outFields: '*',
