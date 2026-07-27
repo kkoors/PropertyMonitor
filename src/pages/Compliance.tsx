@@ -66,6 +66,7 @@ export default function Compliance({ onEditProperty }: Props) {
   const [checking, setChecking] = useState<Record<string, boolean>>({})
   const [messages, setMessages] = useState<Record<string, string>>({})
   const [updatingAll, setUpdatingAll] = useState(false)
+  const [fillingYears, setFillingYears] = useState(false)
   const [updateMsg, setUpdateMsg] = useState('')
   const [search, setSearch] = useState('')
   const [sortCol, setSortCol] = useState<SortCol>('name')
@@ -78,6 +79,25 @@ export default function Compliance({ onEditProperty }: Props) {
     const data = await fetch('/api/compliance').then(r => r.json())
     setRows(data)
     setLoading(false)
+  }
+
+  // Year built drives the lead rules, so a missing one leaves that column blank.
+  async function fillYearBuilt() {
+    setFillingYears(true)
+    setUpdateMsg('Looking up year built…')
+    try {
+      const res = await fetch('/api/compliance/year-built-all', { method: 'POST' })
+      const data = await res.json()
+      const stuck = data.failed?.length
+        ? ` ${data.failed.length} still unknown: ${data.failed.map((f: any) => f.name).join(', ')}`
+        : ''
+      setUpdateMsg(`Filled ${data.filled.length} of ${data.checked}.${stuck}`)
+      await load()
+    } catch {
+      setUpdateMsg('Year-built lookup failed')
+    } finally {
+      setFillingYears(false)
+    }
   }
 
   async function updateAllLicenses() {
@@ -174,6 +194,10 @@ export default function Compliance({ onEditProperty }: Props) {
         <button className="btn btn-ghost" onClick={load}>⟳ Refresh</button>
         <button className="btn btn-primary" disabled={updatingAll} onClick={updateAllLicenses}>
           {updatingAll ? '⟳ Checking…' : 'Update All Licenses'}
+        </button>
+        <button className="btn btn-ghost" disabled={fillingYears} onClick={fillYearBuilt}
+          title="Look up year built for every property still missing one">
+          {fillingYears ? '⟳ Looking up…' : 'Fill Year Built'}
         </button>
         {updateMsg && <span style={{ fontSize: 13, color: '#2563eb' }}>{updateMsg}</span>}
       </div>

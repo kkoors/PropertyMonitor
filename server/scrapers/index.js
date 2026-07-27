@@ -9,7 +9,11 @@ function makeRunScrapers(db) {
     const run = db.prepare(`INSERT INTO scrape_runs (triggered_by) VALUES (?)`).run(triggeredBy);
     const runId = run.lastInsertRowid;
 
-    const properties = db.prepare(`SELECT * FROM properties WHERE active = 1 AND private_ws = 0`).all();
+    // Skip owner-paid water: we don't handle those bills.
+    const properties = db.prepare(
+      `SELECT * FROM properties WHERE active = 1 AND private_ws = 0
+        AND COALESCE(water_responsibility, 'management') <> 'owner'`
+    ).all();
     let billsFound = 0, errors = 0;
     const log = [];
     let browser = null;

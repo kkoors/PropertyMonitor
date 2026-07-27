@@ -173,6 +173,12 @@ function initSchema(db) {
   if (!ownerCols.includes('sdat_checked_at')) db.prepare(`ALTER TABLE properties ADD COLUMN sdat_checked_at TEXT`).run();
   if (!ownerCols.includes('hidden_lead_units')) db.prepare(`ALTER TABLE properties ADD COLUMN hidden_lead_units TEXT`).run();
   if (!ownerCols.includes('opengov_location_id')) db.prepare(`ALTER TABLE properties ADD COLUMN opengov_location_id TEXT`).run();
+  // Title moved to an LLC while SDAT still lists the individual — suppresses
+  // the owner-name mismatch flag on the tax address page.
+  if (!ownerCols.includes('ignore_name_mismatch')) db.prepare(`ALTER TABLE properties ADD COLUMN ignore_name_mismatch INTEGER NOT NULL DEFAULT 0`).run();
+  // Who pays the water bill: owner | management | tenant. Owner-paid
+  // properties are not monitored for water.
+  if (!ownerCols.includes('water_responsibility')) db.prepare(`ALTER TABLE properties ADD COLUMN water_responsibility TEXT NOT NULL DEFAULT 'management'`).run();
 
   db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
   // OpenGov applicant account whose records map addresses -> DHCD location IDs

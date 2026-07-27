@@ -227,9 +227,27 @@ async function resolveLocationIdByAddress(address) {
   return { needsUnit: true, units: rows.filter(r => r.unit).map(r => r.unit) };
 }
 
+// DHCD knows the year built for every location it holds, including condo
+// units that the parcel layers miss.
+async function lookupYearBuiltByAddress(address, knownLocationId) {
+  let id = knownLocationId || null;
+  if (!id) {
+    const hit = await resolveLocationIdByAddress(address);
+    if (!hit || !hit.locationID) return null;
+    id = hit.locationID;
+  }
+  try {
+    const data = await fetchJson(`${API}/locations?filter%5Bid%5D=${encodeURIComponent(id)}`);
+    const a = (data.data || [])[0] && data.data[0].attributes;
+    const year = a && Number(a.yearBuilt);
+    return year > 1700 ? { year_built: year, locationID: id } : null;
+  } catch { return null; }
+}
+
 module.exports = {
   harvestOpenGovLocations,
   addressKey,
   keyFromAddress,
   resolveLocationIdByAddress,
+  lookupYearBuiltByAddress,
 };

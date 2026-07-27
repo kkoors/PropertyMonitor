@@ -4,7 +4,7 @@ const { lookupSdat, lookupSdatMailing } = require('../scrapers/sdat');
 const { scrapeRentalLicenseBaltimoreCounty } = require('../scrapers/rentalLicenseBaltimoreCounty');
 const { scrapeRentalLicenseBaltimoreCity } = require('../scrapers/rentalLicenseBaltimoreCity');
 const { scrapeMdeRegistration, scrapeMdeCertificate } = require('../scrapers/mde');
-const { harvestOpenGovLocations, keyFromAddress, resolveLocationIdByAddress } = require('../scrapers/opengovLocations');
+const { harvestOpenGovLocations, keyFromAddress, resolveLocationIdByAddress, lookupYearBuiltByAddress } = require('../scrapers/opengovLocations');
 
 const DAYS = ms => Math.round(ms / 86400000);
 
@@ -223,19 +223,64 @@ module.exports = function makeComplianceRouter(db) {
     res.json(result);
   });
 
+  // Year built, trying every source we have: the jurisdiction's parcel layer,
+  // then the statewide layer, then DHCD (which knows condo units the parcel
+  // layers miss).
+  async function findYearBuilt(property) {
+    const result = await lookupSdat(property);
+    if (result && result.year_built) return result;
+
+    if (property.municipality === 'baltimore_city') {
+      try {
+        const og = await lookupYearBuiltByAddress(property.address, property.opengov_location_id);
+        if (og && og.year_built) {
+          console.log(`[year-built] ${property.name}: ${og.year_built} from DHCD location ${og.locationID}`);
+          return { year_built: og.year_built, sdat_acct: result && result.sdat_acct, source: 'dhcd' };
+        }
+      } catch (err) {
+        console.log(`[year-built] DHCD lookup failed for ${property.name}: ${err.message}`);
+      }
+    }
+    return result;
+  }
+
+  function saveYearBuilt(property, result) {
+    if (!result || !result.year_built) return false;
+    db.prepare(`UPDATE properties SET year_built = ?, sdat_acct = COALESCE(?, sdat_acct) WHERE id = ?`)
+      .run(result.year_built, result.sdat_acct || null, property.id);
+    return true;
+  }
+
   // Trigger SDAT lookup for a property
   router.post('/sdat/:propertyId', aw(async (req, res) => {
     const property = db.prepare(`SELECT * FROM properties WHERE id = ?`).get(req.params.propertyId);
     if (!property) return res.status(404).json({ error: 'Not found' });
 
-    const result = await lookupSdat(property);
-    if (result.error) return res.status(422).json({ error: result.error });
-
-    if (result.year_built) {
-      db.prepare(`UPDATE properties SET year_built = ?, sdat_acct = ? WHERE id = ?`)
-        .run(result.year_built, result.sdat_acct || property.sdat_acct, property.id);
-    }
+    const result = await findYearBuilt(property);
+    if (result.error && !result.year_built) return res.status(422).json({ error: result.error });
+    saveYearBuilt(property, result);
     res.json(result);
+  }));
+
+  // Bulk: fill in every missing year built (?force=1 re-checks them all)
+  router.post('/year-built-all', aw(async (req, res) => {
+    const force = req.query.force === '1';
+    const targets = db.prepare(
+      `SELECT * FROM properties WHERE active = 1 ${force ? '' : 'AND (year_built IS NULL OR year_built = 0)'} ORDER BY name`
+    ).all();
+
+    const filled = [], failed = [];
+    for (const p of targets) {
+      try {
+        const r = await findYearBuilt(p);
+        if (saveYearBuilt(p, r)) filled.push({ id: p.id, name: p.name, year_built: r.year_built });
+        else failed.push({ id: p.id, name: p.name, error: (r && r.error) || 'not found in any source' });
+      } catch (err) {
+        failed.push({ id: p.id, name: p.name, error: err.message });
+      }
+    }
+    console.log(`[year-built] filled ${filled.length}, still missing ${failed.length} of ${targets.length}`);
+    res.json({ checked: targets.length, filled, failed });
   }));
 
   // Helper to upsert a rental license/registration result (including optional confirmation_letter blob)
@@ -606,11 +651,14 @@ module.exports = function makeComplianceRouter(db) {
     const ownerOk = looseMatch(p.owner_address, p.sdat_mailing_address);
     if (ownerOk === true) return { status: 'green', label: 'Matches owner address' };
     if (ownerOk === null) return { status: 'yellow', label: 'No owner address on file to compare' };
+    // Title held by an LLC while SDAT still lists the individual (or vice
+    // versa) is a known, accepted difference on these properties.
+    if (p.ignore_name_mismatch) return { status: 'na', label: 'Mismatch accepted' };
     return { status: 'red', label: 'Does not match owner address' };
   }
 
   router.get('/tax-address', (req, res) => {
-    const props = db.prepare(`SELECT id, name, address, municipality, owner_name, owner_address, tax_id, sdat_mailing_address, sdat_checked_at FROM properties WHERE active = 1 ORDER BY name`).all();
+    const props = db.prepare(`SELECT id, name, address, municipality, owner_name, owner_address, tax_id, sdat_mailing_address, sdat_checked_at, ignore_name_mismatch FROM properties WHERE active = 1 ORDER BY name`).all();
     res.json(props.map(p => ({ ...p, flag: taxAddressFlag(p) })));
   });
 
@@ -624,7 +672,7 @@ module.exports = function makeComplianceRouter(db) {
     db.prepare(`UPDATE properties SET sdat_mailing_address = ?, sdat_checked_at = datetime('now'), tax_id = COALESCE(NULLIF(tax_id, ''), ?), owner_name = COALESCE(NULLIF(owner_name, ''), ?) WHERE id = ?`)
       .run(result.mailing_address, result.tax_id, result.owner_name || null, property.id);
 
-    const updated = db.prepare(`SELECT id, name, address, municipality, owner_name, owner_address, tax_id, sdat_mailing_address, sdat_checked_at FROM properties WHERE id = ?`).get(property.id);
+    const updated = db.prepare(`SELECT id, name, address, municipality, owner_name, owner_address, tax_id, sdat_mailing_address, sdat_checked_at, ignore_name_mismatch FROM properties WHERE id = ?`).get(property.id);
     res.json({ ...updated, flag: taxAddressFlag(updated) });
   }));
 

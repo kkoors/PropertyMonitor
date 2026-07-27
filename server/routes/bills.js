@@ -6,11 +6,14 @@ module.exports = function makeBillsRouter(db) {
 
   router.get('/', (req, res) => {
     const { property_id, status, limit = 100 } = req.query;
+    // Owner-paid water is not our responsibility, so those bills stay off the
+    // water pages entirely (?all=1 shows them anyway).
     let query = `
       SELECT b.*, p.name as property_name, p.municipality
       FROM bills b
       JOIN properties p ON p.id = b.property_id
       WHERE 1=1
+      ${req.query.all === '1' ? '' : `AND COALESCE(p.water_responsibility, 'management') <> 'owner'`}
     `;
     const params = [];
     if (property_id) { query += ' AND b.property_id = ?'; params.push(property_id); }

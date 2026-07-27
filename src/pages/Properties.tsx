@@ -9,7 +9,7 @@ const MUNICIPALITIES = [
   { value: 'harford', label: 'Harford County' },
 ]
 
-const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '', owner_name: '', owner_address: '', commercial: false, multifamily: false, lead_not_monitored: false, license_not_monitored: false, tax_id: '', water_mailing_address: '', opengov_location_id: '' }
+const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '', owner_name: '', owner_address: '', commercial: false, multifamily: false, lead_not_monitored: false, license_not_monitored: false, tax_id: '', water_mailing_address: '', opengov_location_id: '', ignore_name_mismatch: false, water_responsibility: 'management' }
 
 interface Props {
   editPropertyId?: number | null
@@ -66,6 +66,8 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
       tax_id: form.tax_id || null,
       water_mailing_address: form.water_mailing_address || null,
       opengov_location_id: form.opengov_location_id || null,
+        ignore_name_mismatch: form.ignore_name_mismatch ? 1 : 0,
+        water_responsibility: form.water_responsibility || 'management',
       owner_name: form.owner_name || null,
       owner_address: form.owner_address || null,
       lead_free_cert_date: form.lead_free_cert_date || null,
@@ -79,7 +81,7 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
   }
 
   function startEdit(p: any) {
-    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '', owner_name: p.owner_name || '', owner_address: p.owner_address || '', commercial: !!p.commercial, multifamily: !!p.multifamily, lead_not_monitored: !!p.lead_not_monitored, license_not_monitored: !!p.license_not_monitored, tax_id: p.tax_id || '', water_mailing_address: p.water_mailing_address || '', opengov_location_id: p.opengov_location_id || '' })
+    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '', owner_name: p.owner_name || '', owner_address: p.owner_address || '', commercial: !!p.commercial, multifamily: !!p.multifamily, lead_not_monitored: !!p.lead_not_monitored, license_not_monitored: !!p.license_not_monitored, tax_id: p.tax_id || '', water_mailing_address: p.water_mailing_address || '', opengov_location_id: p.opengov_location_id || '', ignore_name_mismatch: !!p.ignore_name_mismatch, water_responsibility: p.water_responsibility || 'management' })
     setEditId(p.id)
     setShowForm(true)
   }
@@ -278,6 +280,22 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
             <div className="form-group full-col">
               <label>Water Bill Mailing Address</label>
               <input value={form.water_mailing_address} onChange={e => setForm(f => ({ ...f, water_mailing_address: e.target.value }))} placeholder="Where the water bill is mailed" />
+            </div>
+            <div className="form-group">
+              <label>Water Bill Responsibility</label>
+              <select value={form.water_responsibility} onChange={e => setForm(f => ({ ...f, water_responsibility: e.target.value }))}>
+                <option value="management">Management Company</option>
+                <option value="owner">Owner</option>
+                <option value="tenant">Tenant</option>
+              </select>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>Owner-paid properties are hidden from the Water Dashboard and Water Bills</span>
+            </div>
+            <div className="form-group" style={{ justifyContent: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
+                <input type="checkbox" checked={form.ignore_name_mismatch} onChange={e => setForm(f => ({ ...f, ignore_name_mismatch: e.target.checked }))} />
+                Ignore Owner Name Mismatch
+              </label>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>Title held by an LLC while SDAT still lists the individual</span>
             </div>
             {form.municipality === 'baltimore_city' && (
               <div className="form-group full-col">

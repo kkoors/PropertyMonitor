@@ -21,7 +21,8 @@ export default function Dashboard({ onNavigate }: Props) {
     ])
     const totalOwed = newBillsRes.reduce((s: number, b: any) => s + (b.amount_due || 0), 0)
     setStats({
-      properties: propsRes.filter((p: any) => !p.private_ws).length,
+      // Owner-paid and private water aren't monitored here
+      properties: propsRes.filter((p: any) => !p.private_ws && p.water_responsibility !== 'owner').length,
       newBills: newBillsRes.length,
       totalOwed,
       lastRun: runsRes[0]?.finished_at || 'Never'
