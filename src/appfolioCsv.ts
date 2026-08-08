@@ -51,8 +51,22 @@ export function unitlessStreetKey(address: string): string {
   return looseStreetKey(s)
 }
 
+// Tab-separated exports are common — Excel produces them, and a tab file has
+// no trouble with the commas inside an address. Whichever character appears
+// more on the first substantial line is the delimiter.
+function sniffDelimiter(text: string): string {
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    const tabs = (line.match(/\t/g) || []).length
+    const commas = (line.match(/,/g) || []).length
+    if (tabs || commas) return tabs >= commas ? '\t' : ','
+  }
+  return ','
+}
+
 // Minimal CSV parser with quoted-field support
-export function parseCsv(text: string): string[][] {
+export function parseCsv(text: string, delimiter?: string): string[][] {
+  const delim = delimiter || sniffDelimiter(text)
   const rows: string[][] = []
   let row: string[] = [], field = '', inQuotes = false
   for (let i = 0; i < text.length; i++) {
@@ -63,7 +77,7 @@ export function parseCsv(text: string): string[][] {
         else inQuotes = false
       } else field += c
     } else if (c === '"') inQuotes = true
-    else if (c === ',') { row.push(field); field = '' }
+    else if (c === delim) { row.push(field); field = '' }
     else if (c === '\n' || c === '\r') {
       if (c === '\r' && text[i + 1] === '\n') i++
       row.push(field); field = ''
@@ -225,8 +239,10 @@ export function mapAppfolioCsv(text: string): { rows: ImportRow[]; warnings: str
   const cityCol  = findCol(headers, /^city$/i)
   const stateCol = findCol(headers, /^state$/i, /^st$/i)
   const zipCol   = findCol(headers, /zip/i, /postal/i)
-  const ownerCol = findCol(headers, /^owner\s*name?s?$/i, /^owners?$/i)
-  const ownerAddrCol = findCol(headers, /owner.*address/i)
+  const ownerAddrCol = findCol(headers, /owner.*address/i, /mailing.*address/i)
+  // "Owner(s)", "Owner Name", "Owners" — anything mentioning an owner that
+  // isn't the owner's address column.
+  const ownerCol = headers.findIndex((h, i) => i !== ownerAddrCol && /owner/i.test(h))
 
   // A header we can't place is worse than no header — fall back to reading the
   // file as a plain address list rather than importing nothing.
@@ -237,36 +253,56 @@ export function mapAppfolioCsv(text: string): { rows: ImportRow[]; warnings: str
   }
 
   const rows: ImportRow[] = raw.slice(headerIdx + 1).map(r => {
-    const cell = (r[addrCol] || '').trim()
-    let city = cityCol >= 0 ? (r[cityCol] || '').trim() : ''
-    let state = stateCol >= 0 ? (r[stateCol] || '').trim() : ''
-    let zip = zipCol >= 0 ? (r[zipCol] || '').trim() : ''
+    // An unquoted "10 Valley Ridge Loop Cockeysville, MD 21030" has already
+    // been split at its own comma, so the row carries more cells than the
+    // header has columns and every later column is shifted along. Work out how
+    // many of the surplus cells the address actually took: keep absorbing until
+    // a ZIP turns up, then stop — the rest belong to whatever follows, since a
+    // name like "Emerge Properties, LLC" splits the same way.
+    const extra = Math.max(0, r.length - headers.length)
+    const lastCol = headers.length - 1
+    let taken = 0
+    if (addrCol === lastCol) {
+      taken = extra   // nothing follows the address, so it's all address
+    } else {
+      while (taken < extra && !/\d{5}/.test(r.slice(addrCol, addrCol + taken + 1).join(' '))) taken++
+    }
 
-    // With no city column the whole address sits in one field — but an unquoted
-    // "10 Valley Ridge Loop Cockeysville, MD 21030" has already been split at
-    // its comma, leaving "MD 21030" in the next cell. Anything trailing the
-    // address column is part of the same address, so it's stitched back on.
-    let street = cell
+    // The final column mops up anything still spare, so a comma inside the last
+    // value doesn't truncate it.
+    const at = (col: number): string => {
+      if (col < 0) return ''
+      const from = col > addrCol ? col + taken : col
+      const cells = col === lastCol ? r.slice(from) : [r[from]]
+      return cells.map(c => (c || '').trim()).filter(Boolean).join(', ')
+    }
+
+    const addrCells = r.slice(addrCol, addrCol + taken + 1).map(c => (c || '').trim()).filter(Boolean)
+    let city = at(cityCol)
+    let state = at(stateCol)
+    let zip = at(zipCol)
+
+    // With no city column the whole address sits in that one field, in
+    // whatever shape the export used.
+    let street = addrCells[0] || ''
     if (!city || !zip) {
-      const trailing = (cityCol < 0 && stateCol < 0 && zipCol < 0)
-        ? r.slice(addrCol + 1).map(c => (c || '').trim()).filter(Boolean)
-        : []
-      const parsed = parseAddressLine([cell, ...trailing].join(', '))
-      street = parsed.street || cell
+      const parsed = parseAddressLine(addrCells.join(', '))
+      street = parsed.street || street
       city = city || parsed.city
       state = state || parsed.state
       zip = zip || parsed.zip
     }
 
     return {
-      name: (nameCol >= 0 ? r[nameCol] : '')?.trim() || street,
+      name: (nameCol >= 0 ? at(nameCol) : '') || street,
       // Same shape as the properties we already hold — "STREET, CITY, MD, ZIP".
       // The parcel and licence lookups parse this, so a different layout here
       // would quietly fail to match.
       address: [street, city, state || (city ? 'MD' : ''), zip].filter(Boolean).join(', '),
       municipality: guessMunicipality(city, zip),
-      owner_name: ownerCol >= 0 ? (r[ownerCol] || '').trim() : '',
-      owner_address: ownerAddrCol >= 0 ? (r[ownerAddrCol] || '').trim() : '',
+      // AppFolio writes double spaces into some names ("Paul  Eiseman").
+      owner_name: at(ownerCol).replace(/\s+/g, ' '),
+      owner_address: at(ownerAddrCol).replace(/\s+/g, ' '),
     }
   }).filter(r => r.address)
 
