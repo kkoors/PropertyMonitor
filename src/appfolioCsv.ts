@@ -19,16 +19,36 @@ export function streetKey(address: string): string {
   return (address || '').split(',')[0].toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
+// Long spellings folded to the abbreviation we store, so "Hazel Lane" matches
+// "HAZEL LN" and "North Bentalou Street" matches "N BENTALOU ST". The type is
+// normalised rather than dropped — Oak Rd and Oak St stay different streets.
+const WORD_FORMS: [RegExp, string][] = [
+  [/\bAVENUE\b/g, 'AVE'], [/\bBOULEVARD\b/g, 'BLVD'], [/\bCIRCLE\b/g, 'CIR'],
+  [/\bCOURT\b/g, 'CT'], [/\bDRIVE\b/g, 'DR'], [/\bHIGHWAY\b/g, 'HWY'],
+  [/\bLANE\b/g, 'LN'], [/\bPARKWAY\b/g, 'PKWY'], [/\bPLACE\b/g, 'PL'],
+  [/\bROAD\b/g, 'RD'], [/\bSQUARE\b/g, 'SQ'], [/\bSTREET\b/g, 'ST'],
+  [/\bTERRACE\b/g, 'TER'], [/\bTRAIL\b/g, 'TRL'],
+  [/\bNORTH\b/g, 'N'], [/\bSOUTH\b/g, 'S'], [/\bEAST\b/g, 'E'], [/\bWEST\b/g, 'W'],
+  [/\bSAINT\b/g, 'ST'], [/\bMOUNT\b/g, 'MT'],
+]
+
 // A deliberately loose key for spellings we've corrected here but AppFolio
 // still has wrong: apostrophes, hyphens and missing spaces all disappear, so
-// "2831 ODONNELL" matches "2831 O'Donnell" and "1010 WESTSHORE" matches
-// "1010 West Shore". Street types are left alone — Oak Rd and Oak St are
-// different streets, and collapsing them would merge real properties.
+// "2831 ODONNELL" matches "2831 O'Donnell" and "1010 WSHORE" matches
+// "1010 West Shore".
 export function looseStreetKey(address: string): string {
-  return streetKey(address)
-    .replace(/\bSAINT\b/g, 'ST')
-    .replace(/\bMOUNT\b/g, 'MT')
-    .replace(/[^A-Z0-9]/g, '')
+  let s = streetKey(address)
+  for (const [re, to] of WORD_FORMS) s = s.replace(re, to)
+  return s.replace(/[^A-Z0-9]/g, '')
+}
+
+// Last resort: the same key with any unit designator removed, for exports that
+// carry the unit in the street line when we hold the building as one record.
+export function unitlessStreetKey(address: string): string {
+  const s = streetKey(address)
+    .replace(new RegExp(`\\b(${UNIT_WORDS})\\b.*$`), '')
+    .replace(/#.*$/, '')
+  return looseStreetKey(s)
 }
 
 // Minimal CSV parser with quoted-field support
@@ -92,6 +112,65 @@ export function guessMunicipality(city: string, zip: string): string {
 // A row that starts with a street number is data, not a header.
 const looksLikeAddress = (cells: string[]) => /^\s*\d+[-\s]/.test(cells[0] || '')
 
+// Street types, longest spellings first so "Drive" wins over "Dr".
+const STREET_TYPES = [
+  'AVENUE', 'AVE', 'BOULEVARD', 'BLVD', 'CIRCLE', 'CIR', 'COURT', 'CT', 'DRIVE', 'DR',
+  'HIGHWAY', 'HWY', 'LANE', 'LN', 'LOOP', 'PARKWAY', 'PKWY', 'PLACE', 'PL', 'ROAD', 'RD',
+  'SQUARE', 'SQ', 'STREET', 'ST', 'TERRACE', 'TER', 'TRAIL', 'TRL', 'WAY',
+]
+const UNIT_WORDS = 'APT|APARTMENT|UNIT|STE|SUITE|FL|FLOOR|BSMT|BASEMENT|RM|ROOM'
+
+// Splits "10 Valley Ridge Loop Cockeysville" into street and city. The export
+// runs the two together with no comma, so the street type is the only marker
+// of where the street ends — everything after the last one is the city. A unit
+// that follows the street type ("… Drive Unit 120-H Bel Air") stays with the
+// street, or it would be read as part of the city.
+function splitStreetAndCity(s: string): { street: string, city: string } {
+  const words = s.trim().split(/\s+/)
+  let cut = -1
+  for (let i = words.length - 1; i >= 1; i--) {
+    const w = words[i].toUpperCase().replace(/[^A-Z]/g, '')
+    if (STREET_TYPES.includes(w)) { cut = i; break }
+  }
+  if (cut < 0 || cut === words.length - 1) return { street: s.trim(), city: '' }
+
+  let end = cut + 1
+  const unitRe = new RegExp(`^(#|(${UNIT_WORDS})$)`, 'i')
+  if (unitRe.test(words[end].replace(/[.,]/g, ''))) {
+    // "Unit 120-H" — take the keyword and the designator that follows it.
+    end += words[end].startsWith('#') ? 1 : 2
+  }
+  return { street: words.slice(0, end).join(' '), city: words.slice(end).join(' ') }
+}
+
+// Pulls street/city/state/ZIP out of a single address line, however it's
+// punctuated: "123 Main St, Baltimore, MD 21201", "123 Main St Baltimore, MD
+// 21201", or a row whose commas have already split it into cells.
+export function parseAddressLine(line: string): { street: string, city: string, state: string, zip: string } {
+  const parts = String(line || '').split(',').map(s => s.trim()).filter(Boolean)
+  if (!parts.length) return { street: '', city: '', state: '', zip: '' }
+
+  let state = '', zip = ''
+  const tail = parts.slice(1).join(' ')
+  const m = tail.match(/\b([A-Za-z]{2})\b[\s,]*(\d{5})(?:-\d{4})?\s*$/)
+  let rest: string
+  if (m) {
+    state = m[1].toUpperCase()
+    zip = m[2]
+    rest = tail.slice(0, m.index).trim()
+  } else {
+    const z = tail.match(/\b(\d{5})(?:-\d{4})?\b/)
+    zip = z ? z[1] : ''
+    rest = (z ? tail.slice(0, z.index) : tail).replace(/\b[A-Za-z]{2}\b\s*$/, '').trim()
+  }
+
+  // Anything left between the street and the state is the city. If there was
+  // none, the city is still buried in the first segment.
+  if (rest) return { street: parts[0], city: rest, state, zip }
+  const split = splitStreetAndCity(parts[0])
+  return { street: split.street, city: split.city, state, zip }
+}
+
 // Some exports are just a bare list of addresses with no header row at all,
 // either one per line or split across street/city/state/zip columns. Nothing
 // then names the columns, so they're identified by shape: a two-letter state,
@@ -105,22 +184,8 @@ function mapHeaderless(raw: string[][]): { rows: ImportRow[]; warnings: string[]
     // An unquoted "123 Main St, Baltimore, MD 21201" arrives already split on
     // its commas, so real columns and one run-together field look the same by
     // the time we see them. Rejoining and parsing the whole line handles both.
-    const parts = cells.join(', ').split(',').map(s => s.trim()).filter(Boolean)
-    const street = parts[0]
+    const { street, city, state, zip } = parseAddressLine(cells.join(', '))
     if (!street) continue
-
-    const tail = parts.slice(1).join(' ')
-    let city = '', state = '', zip = ''
-    const m = tail.match(/\b([A-Za-z]{2})\b[\s,]*(\d{5})(?:-\d{4})?\s*$/)
-    if (m) {
-      state = m[1].toUpperCase()
-      zip = m[2]
-      city = tail.slice(0, m.index).trim()
-    } else {
-      const z = tail.match(/\b(\d{5})(?:-\d{4})?\b/)
-      zip = z ? z[1] : ''
-      city = (z ? tail.slice(0, z.index) : tail).replace(/\b[A-Za-z]{2}\b\s*$/, '').trim()
-    }
 
     rows.push({
       name: street,
@@ -154,26 +219,51 @@ export function mapAppfolioCsv(text: string): { rows: ImportRow[]; warnings: str
   const headers = raw[headerIdx].map(h => h.trim())
 
   const nameCol  = findCol(headers, /^property\s*name$/i, /^property$/i, /^name$/i)
-  const addrCol  = findCol(headers, /^address\s*1?$/i, /street/i, /^address/i)
+  // "Property Address" and "Service Address" are as common as a bare
+  // "Address", so the column is matched anywhere in the heading.
+  const addrCol  = findCol(headers, /^address\s*1?$/i, /address/i, /street/i)
   const cityCol  = findCol(headers, /^city$/i)
   const stateCol = findCol(headers, /^state$/i, /^st$/i)
   const zipCol   = findCol(headers, /zip/i, /postal/i)
   const ownerCol = findCol(headers, /^owner\s*name?s?$/i, /^owners?$/i)
   const ownerAddrCol = findCol(headers, /owner.*address/i)
 
-  if (addrCol < 0) warnings.push('Could not find an address column — check the export')
+  // A header we can't place is worse than no header — fall back to reading the
+  // file as a plain address list rather than importing nothing.
+  if (addrCol < 0) {
+    const data = raw.filter(r => looksLikeAddress(r))
+    if (data.length) return mapHeaderless(data)
+    return { rows: [], warnings: [...warnings, 'Could not find an address column — check the export'] }
+  }
 
   const rows: ImportRow[] = raw.slice(headerIdx + 1).map(r => {
-    const address = (r[addrCol] || '').trim()
-    const city = cityCol >= 0 ? (r[cityCol] || '').trim() : ''
-    const state = stateCol >= 0 ? (r[stateCol] || '').trim() : ''
-    const zip = zipCol >= 0 ? (r[zipCol] || '').trim() : ''
+    const cell = (r[addrCol] || '').trim()
+    let city = cityCol >= 0 ? (r[cityCol] || '').trim() : ''
+    let state = stateCol >= 0 ? (r[stateCol] || '').trim() : ''
+    let zip = zipCol >= 0 ? (r[zipCol] || '').trim() : ''
+
+    // With no city column the whole address sits in one field — but an unquoted
+    // "10 Valley Ridge Loop Cockeysville, MD 21030" has already been split at
+    // its comma, leaving "MD 21030" in the next cell. Anything trailing the
+    // address column is part of the same address, so it's stitched back on.
+    let street = cell
+    if (!city || !zip) {
+      const trailing = (cityCol < 0 && stateCol < 0 && zipCol < 0)
+        ? r.slice(addrCol + 1).map(c => (c || '').trim()).filter(Boolean)
+        : []
+      const parsed = parseAddressLine([cell, ...trailing].join(', '))
+      street = parsed.street || cell
+      city = city || parsed.city
+      state = state || parsed.state
+      zip = zip || parsed.zip
+    }
+
     return {
-      name: (nameCol >= 0 ? r[nameCol] : '')?.trim() || address.split(',')[0],
+      name: (nameCol >= 0 ? r[nameCol] : '')?.trim() || street,
       // Same shape as the properties we already hold — "STREET, CITY, MD, ZIP".
       // The parcel and licence lookups parse this, so a different layout here
       // would quietly fail to match.
-      address: [address, city, state || (city ? 'MD' : ''), zip].filter(Boolean).join(', '),
+      address: [street, city, state || (city ? 'MD' : ''), zip].filter(Boolean).join(', '),
       municipality: guessMunicipality(city, zip),
       owner_name: ownerCol >= 0 ? (r[ownerCol] || '').trim() : '',
       owner_address: ownerAddrCol >= 0 ? (r[ownerAddrCol] || '').trim() : '',

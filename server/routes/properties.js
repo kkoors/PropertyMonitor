@@ -58,10 +58,27 @@ module.exports = function makePropertiesRouter(db) {
     // Mirrors streetKey/looseStreetKey in src/appfolioCsv.ts — the preview and
     // the import have to agree on what counts as the same property, or a row
     // shown as "Update" would come in as a second copy.
+    const WORD_FORMS = [
+      [/\bAVENUE\b/g, 'AVE'], [/\bBOULEVARD\b/g, 'BLVD'], [/\bCIRCLE\b/g, 'CIR'],
+      [/\bCOURT\b/g, 'CT'], [/\bDRIVE\b/g, 'DR'], [/\bHIGHWAY\b/g, 'HWY'],
+      [/\bLANE\b/g, 'LN'], [/\bPARKWAY\b/g, 'PKWY'], [/\bPLACE\b/g, 'PL'],
+      [/\bROAD\b/g, 'RD'], [/\bSQUARE\b/g, 'SQ'], [/\bSTREET\b/g, 'ST'],
+      [/\bTERRACE\b/g, 'TER'], [/\bTRAIL\b/g, 'TRL'],
+      [/\bNORTH\b/g, 'N'], [/\bSOUTH\b/g, 'S'], [/\bEAST\b/g, 'E'], [/\bWEST\b/g, 'W'],
+      [/\bSAINT\b/g, 'ST'], [/\bMOUNT\b/g, 'MT'],
+    ];
+    const UNIT_WORDS = /\b(APT|APARTMENT|UNIT|STE|SUITE|FL|FLOOR|BSMT|BASEMENT|RM|ROOM)\b.*$/;
+
     const normStreet = a => (a || '').split(',')[0].toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-    const looseStreet = a => normStreet(a).replace(/\bSAINT\b/g, 'ST').replace(/\bMOUNT\b/g, 'MT').replace(/[^A-Z0-9]/g, '');
+    const looseStreet = a => {
+      let s = normStreet(a);
+      for (const [re, to] of WORD_FORMS) s = s.replace(re, to);
+      return s.replace(/[^A-Z0-9]/g, '');
+    };
+    const unitlessStreet = a => looseStreet(normStreet(a).replace(UNIT_WORDS, ''));
+
     const existing = db.prepare(`SELECT id, address FROM properties`).all()
-      .map(p => ({ id: p.id, key: normStreet(p.address), loose: looseStreet(p.address) }));
+      .map(p => ({ id: p.id, key: normStreet(p.address), loose: looseStreet(p.address), unitless: unitlessStreet(p.address) }));
 
     let created = 0, updated = 0, skipped = 0;
     for (const row of rows) {
@@ -69,8 +86,10 @@ module.exports = function makePropertiesRouter(db) {
       if (!row.address) { skipped++; continue; }
       const key = normStreet(row.address);
       const loose = looseStreet(row.address);
+      const unitless = unitlessStreet(row.address);
       const match = existing.find(e => e.key && e.key === key)
-        || existing.find(e => e.loose && e.loose === loose);
+        || existing.find(e => e.loose && e.loose === loose)
+        || existing.find(e => e.unitless && e.unitless === unitless);
 
       if (match) {
         db.prepare(`UPDATE properties SET
