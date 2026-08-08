@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTableSort } from '../useTableSort'
+import { downloadExcel, cell, dateCell } from '../excel'
 
 const STATUS_BG: Record<string, string> = {
   active: '#dcfce7', expired: '#fee2e2', pending: '#fef9c3', cancelled: '#fee2e2', not_found: '#fee2e2', unknown: '#f3f4f6',
@@ -78,11 +79,37 @@ export default function Licensing({ onEditProperty }: { onEditProperty?: (id: nu
     r => [r.name, r.address, r.municipality, r.license_number, r.status],
   )
 
+  // One row per license — a multi-unit property expands the same way it does
+  // on screen, so a unit's licence isn't hidden inside a merged cell.
+  function exportExcel() {
+    downloadExcel('rental-licensing', 'Licensing', monitored.flatMap(r => {
+      const lics: any[] = r.licenses && r.licenses.length > 0 ? r.licenses : [null]
+      return lics.map((l: any) => {
+        const lic = l || r
+        return {
+          Property: r.name,
+          Address: cell(r.address),
+          Municipality: r.municipality === 'baltimore_city' ? 'Baltimore City' : 'Baltimore County',
+          Unit: cell(l?.unit),
+          'License #': cell(lic.license_number),
+          License: lic.status ? String(lic.status).replace('_', ' ') : 'never checked',
+          Issued: dateCell(lic.issue_date),
+          Expires: dateCell(lic.exp_date),
+          Registration: r.reg_status ? String(r.reg_status).replace('_', ' ') : 'never checked',
+          'Reg Expires': dateCell(r.reg_exp_date),
+          'Last Checked': dateCell(r.scraped_at),
+          'Portal Record': cell(lic.notes?.startsWith?.('http') ? lic.notes : r.license_url),
+        }
+      })
+    }))
+  }
+
   return (
     <div>
       <div className="toolbar">
         <h1>Rental Licensing</h1>
         <input className="filter" style={{ minWidth: 180 }} placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
+        <button className="btn btn-ghost" onClick={exportExcel} title="Download this list to Excel">⬇ Excel</button>
         <button className="btn btn-ghost" onClick={discoverIds} disabled={discovering}
           title="Match Baltimore City properties to their DHCD portal records automatically">
           {discovering ? 'Linking…' : '🔗 Link DHCD Records'}

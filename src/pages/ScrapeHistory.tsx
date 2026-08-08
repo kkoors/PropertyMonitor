@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { downloadExcel, cell } from '../excel'
 
 export default function ScrapeHistory() {
   const [runs, setRuns] = useState<any[]>([])
@@ -16,9 +17,23 @@ export default function ScrapeHistory() {
     setSelected(data)
   }
 
+  function exportExcel() {
+    downloadExcel('scrape-history', 'Scrape History', runs.map(r => ({
+      Started: r.started_at ? new Date(r.started_at).toLocaleString() : '',
+      Finished: r.finished_at ? new Date(r.finished_at).toLocaleString() : '',
+      'Triggered By': cell(r.triggered_by),
+      'Properties Checked': cell(r.properties_checked),
+      'Bills Found': r.bills_found ?? 0,
+      Errors: r.errors ?? 0,
+    })))
+  }
+
   return (
     <div>
-      <div className="toolbar"><h1>Scrape History</h1></div>
+      <div className="toolbar">
+        <h1>Scrape History</h1>
+        <button className="btn btn-ghost" onClick={exportExcel} title="Download this list to Excel">⬇ Excel</button>
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 16, alignItems: 'start' }}>
         <div className="card" style={{ padding: 0 }}>
           {runs.length === 0 ? (

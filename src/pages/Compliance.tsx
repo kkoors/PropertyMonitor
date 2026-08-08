@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
+import { downloadExcel, cell } from '../excel'
 
 type Status = 'green' | 'yellow' | 'red' | 'unknown' | 'na'
 type SortCol = 'name' | 'owner_name' | 'municipality' | 'year_built' | 'water' | 'rental_license' | 'city_registration' | 'lead_registration' | 'lead_cert'
@@ -12,9 +13,13 @@ interface PropertyRow {
   year_built: number | null
   lead_free: number
   private_ws: number
+  owner_name: string | null
   water: ComplianceItem
   rental_license: ComplianceItem
   rental_license_has_letter: boolean
+  city_registration: ComplianceItem
+  lead_registration: ComplianceItem
+  lead_cert: ComplianceItem
   lead: ComplianceItem
 }
 
@@ -178,6 +183,23 @@ export default function Compliance({ onEditProperty }: Props) {
     </th>
   )
 
+  // Each status column exports the label you see in the cell, with the
+  // green/yellow/red flag beside it so the sheet can be filtered on severity.
+  function exportExcel() {
+    downloadExcel('compliance', 'Compliance', displayed.map(r => ({
+      Property: r.name,
+      Address: cell(r.address),
+      Owner: cell(r.owner_name),
+      Municipality: MUNI_LABEL[r.municipality] || r.municipality,
+      'Year Built': cell(r.year_built),
+      'Water Bills': r.water.label, 'Water Flag': r.water.status,
+      'Rental License': r.rental_license.label, 'License Flag': r.rental_license.status,
+      Registration: r.city_registration.label, 'Registration Flag': r.city_registration.status,
+      'Lead Registration': r.lead_registration.label, 'Lead Reg Flag': r.lead_registration.status,
+      'Lead Certificate': r.lead_cert.label, 'Lead Cert Flag': r.lead_cert.status,
+    })))
+  }
+
   if (loading) return <div className="card"><div className="empty">Loading…</div></div>
 
   return (
@@ -192,6 +214,7 @@ export default function Compliance({ onEditProperty }: Props) {
           style={{ minWidth: 200 }}
         />
         <button className="btn btn-ghost" onClick={load}>⟳ Refresh</button>
+        <button className="btn btn-ghost" onClick={exportExcel} title="Download this list to Excel">⬇ Excel</button>
         <button className="btn btn-primary" disabled={updatingAll} onClick={updateAllLicenses}>
           {updatingAll ? '⟳ Checking…' : 'Update All Licenses'}
         </button>

@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from 'react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import * as XLSX from 'xlsx'
 import { useLocalState } from '../useLocalState'
+import { downloadExcel } from '../excel'
 
 const STATUSES = ['', 'new', 'reviewed', 'entered', 'paid']
 
@@ -128,10 +128,7 @@ export default function Bills() {
       'Last Pay Amt': b.last_pay_amount != null ? Math.abs(Number(b.last_pay_amount)) : '',
       Status: b.status,
     }))
-    const ws = XLSX.utils.json_to_sheet(rows)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Bills')
-    XLSX.writeFile(wb, `water-bills${suffix}_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    downloadExcel(`water-bills${suffix}`, 'Bills', rows)
   }
 
   const muniClass = (m: string) => ({ baltimore_city: 'badge-city', baltimore_county: 'badge-county', harford: 'badge-harford' }[m] || '')

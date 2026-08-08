@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTableSort } from '../useTableSort'
+import { downloadExcel, cell, dateCell } from '../excel'
 
 const FLAG_BG: Record<string, string> = { green: '#dcfce7', yellow: '#fef9c3', red: '#fee2e2', unknown: '#f3f4f6' }
 const FLAG_TEXT: Record<string, string> = { green: '#166534', yellow: '#854d0e', red: '#991b1b', unknown: '#6b7280' }
@@ -35,11 +36,31 @@ export default function TaxAddress({ onEditProperty }: { onEditProperty?: (id: n
     } finally { setCheckingAll(false) }
   }
 
+  const displayed = apply(
+    rows,
+    r => [r.name, r.address, r.tax_id, r.owner_address, r.sdat_mailing_address, r.flag?.label],
+    new Set(),
+    (r, col) => col === 'flagStatus' ? r.flag?.status : r[col],
+  )
+
+  function exportExcel() {
+    downloadExcel('tax-mailing-address', 'Tax Address', displayed.map(r => ({
+      Property: r.name,
+      Address: cell(r.address),
+      'Tax ID': cell(r.tax_id),
+      'Owner Address (on file)': cell(r.owner_address),
+      'SDAT Mailing Address': cell(r.sdat_mailing_address),
+      Status: r.flag?.label || '',
+      Checked: dateCell(r.sdat_checked_at),
+    })))
+  }
+
   return (
     <div>
       <div className="toolbar">
         <h1>Tax Mailing Address (SDAT)</h1>
         <input className="filter" style={{ minWidth: 180 }} placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
+        <button className="btn btn-ghost" onClick={exportExcel} title="Download this list to Excel">⬇ Excel</button>
         <button className="btn btn-primary" onClick={checkAll} disabled={checkingAll}>
           {checkingAll ? 'Checking…' : '⟳ Check All'}
         </button>
@@ -56,12 +77,7 @@ export default function TaxAddress({ onEditProperty }: { onEditProperty?: (id: n
             </tr>
           </thead>
           <tbody>
-            {apply(
-              rows,
-              r => [r.name, r.address, r.tax_id, r.owner_address, r.sdat_mailing_address, r.flag?.label],
-              new Set(),
-              (r, col) => col === 'flagStatus' ? r.flag?.status : r[col],
-            ).map(r => (
+            {displayed.map(r => (
               <tr key={r.id}>
                 <td>
                   <button className="btn btn-ghost btn-sm" style={{ fontWeight: 700, fontSize: 14, padding: '2px 6px', textAlign: 'left' }} onClick={() => onEditProperty?.(r.id)} title="Edit property">

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTableSort } from '../useTableSort'
+import { downloadExcel, cell, dateCell } from '../excel'
 
 const currentYear = new Date().getFullYear()
 
@@ -74,11 +75,40 @@ export default function LeadRegistry({ onEditProperty }: { onEditProperty?: (id:
     }
   }
 
+  // Mirrors the table: multifamily properties expand to one row per unit cert,
+  // honouring the "show hidden units" toggle.
+  function exportExcel() {
+    downloadExcel('lead-registry', 'Lead Registry', monitored.flatMap(r => {
+      const visibleUnits = showHidden ? r.units : r.units.filter((u: any) => !u.hidden)
+      const units: any[] = (r.multifamily && visibleUnits.length > 0)
+        ? visibleUnits
+        : [{ unit: '', cert_number: r.cert_number, cert_status: r.cert_status, inspection_date: r.inspection_date }]
+      return units.map((u: any) => ({
+        Property: r.name,
+        Address: cell(r.address),
+        'Tracking ID': cell(r.tracking_id),
+        'Registry Owner': cell(r.registry_owner),
+        'Owner Matches': r.owner_name_match == null ? '' : r.owner_name_match ? 'Yes' : 'No',
+        'Registry Owner Address': cell(r.registry_owner_address),
+        'Address Matches': r.owner_address_match == null ? '' : r.owner_address_match ? 'Yes' : 'No',
+        Registered: dateCell(r.registration_date),
+        'Bank Date': dateCell(r.bank_date),
+        'Paid Thru': cell(r.payment_year),
+        Unit: cell(u.unit),
+        'Cert #': cell(u.cert_number),
+        Cert: cell(u.cert_status),
+        Inspected: dateCell(u.inspection_date),
+        Hidden: u.hidden ? 'Yes' : '',
+      }))
+    }))
+  }
+
   return (
     <div>
       <div className="toolbar">
         <h1>Lead Registry (MDE)</h1>
         <input className="filter" style={{ minWidth: 180 }} placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
+        <button className="btn btn-ghost" onClick={exportExcel} title="Download this list to Excel">⬇ Excel</button>
         <button className={`btn btn-sm ${showHidden ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setShowHidden(s => !s)}>
           {showHidden ? 'Hide hidden units' : 'Show hidden units'}
         </button>

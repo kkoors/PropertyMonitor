@@ -2,6 +2,11 @@ import { useEffect, useState, useMemo } from 'react'
 import type React from 'react'
 import { useLocalState } from '../useLocalState'
 import { mapAppfolioCsv, type ImportRow } from '../appfolioCsv'
+import { downloadExcel, cell, dateCell } from '../excel'
+
+const WATER_RESP_LABEL: Record<string, string> = {
+  management: 'Management Company', owner: 'Owner', tenant: 'Tenant',
+}
 
 const MUNICIPALITIES = [
   { value: 'baltimore_city', label: 'Baltimore City' },
@@ -187,6 +192,32 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
     </th>
   )
 
+  // The full record rather than just the visible columns — this is the list
+  // people hand around, so the flags and monitoring settings come too.
+  function exportExcel() {
+    downloadExcel('properties', 'Properties', displayed.map(p => ({
+      Name: p.name,
+      Address: cell(p.address),
+      Municipality: mLabel(p.municipality),
+      'Water Acct #': cell(p.account_number),
+      'Water Responsibility': WATER_RESP_LABEL[p.water_responsibility || 'management'] || cell(p.water_responsibility),
+      Owner: cell(p.owner_name),
+      'Owner Address': cell(p.owner_address),
+      'Tax ID': cell(p.tax_id),
+      'Year Built': cell(p.year_built),
+      'Private W/S': p.private_ws ? 'Yes' : '',
+      Commercial: p.commercial ? 'Yes' : '',
+      Multifamily: p.multifamily ? 'Yes' : '',
+      'Lead Free': p.lead_free ? 'Yes' : '',
+      'Lead Cert Expires': dateCell(p.lead_free_cert_exp_date),
+      'Lead Not Monitored': p.lead_not_monitored ? 'Yes' : '',
+      'License Not Monitored': p.license_not_monitored ? 'Yes' : '',
+      'ACN Not Monitored': p.acn_not_monitored ? 'Yes' : '',
+      'Ignore Name Mismatch': p.ignore_name_mismatch ? 'Yes' : '',
+      Notes: cell(p.notes),
+    })))
+  }
+
   return (
     <div>
       <div className="toolbar">
@@ -199,6 +230,7 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
         <button className={`btn btn-sm ${showPrivate ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setShowPrivate(s => !s)}>
           {showPrivate ? 'Hide Private W/S' : 'Show Private W/S'}
         </button>
+        <button className="btn btn-ghost" onClick={exportExcel} title="Download this list to Excel">⬇ Excel</button>
         <label className="btn btn-ghost" style={{ cursor: 'pointer' }}>
           Import AppFolio CSV
           <input type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={onImportFile} />

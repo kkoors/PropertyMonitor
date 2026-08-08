@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTableSort } from '../useTableSort'
+import { downloadExcel, cell, dateCell } from '../excel'
 
 const STATUS_BG: Record<string, string> = {
   enrolled: '#dcfce7', pending_enrollment: '#fef9c3', pending_disenrollment: '#fef9c3',
@@ -64,6 +65,18 @@ export default function AcnProgram({ onEditProperty, onConfigure }: { onEditProp
   const monitored = apply(rows, r => [r.name, r.address, MUNI[r.municipality], r.acn.label],
     new Set(), (r, col) => (col === 'acn' ? r.acn.label : r[col]))
 
+  function exportExcel() {
+    downloadExcel('acn-program', 'ACN Program', monitored.map(r => ({
+      Property: r.name,
+      Address: cell(r.address),
+      Municipality: MUNI[r.municipality] || r.municipality,
+      'ACN Status': r.acn.label,
+      Monitored: r.acn.monitored ? 'Yes' : 'No',
+      Updated: dateCell(r.acn_updated_at),
+      'Account #': cell(r.account_number),
+    })))
+  }
+
   const counts = rows.reduce((acc: Record<string, number>, r) => {
     acc[r.acn.status] = (acc[r.acn.status] || 0) + 1
     return acc
@@ -75,6 +88,7 @@ export default function AcnProgram({ onEditProperty, onConfigure }: { onEditProp
         <h1>ACN Program</h1>
         <input className="filter" style={{ minWidth: 180 }} placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
         <button className="btn btn-ghost" onClick={load}>⟳ Refresh</button>
+        <button className="btn btn-ghost" onClick={exportExcel} title="Download this list to Excel">⬇ Excel</button>
         <button className="btn btn-ghost" onClick={() => onConfigure?.()}>✉ Email Setup</button>
       </div>
 
