@@ -36,6 +36,8 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
   const [importWarnings, setImportWarnings] = useState<string[]>([])
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState('')
+  const [verifying, setVerifying] = useState(false)
+  const [verifyProgress, setVerifyProgress] = useState('')
   const [filterMuni, setFilterMuni] = useLocalState('props.filterMuni', '')
   const [showPrivate, setShowPrivate] = useLocalState('props.showPrivate', false)
   const [search, setSearch] = useLocalState('props.search', '')
@@ -146,6 +148,56 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
     reader.readAsText(file)
   }
 
+  // The municipality decides which portal a property is scraped against, and
+  // the ZIP-based guess gets the "mails as Baltimore but is county" addresses
+  // wrong. This asks the Census geocoder instead — but only for rows we're
+  // actually creating, since matched rows keep the municipality already on file
+  // and geocoding them would be a wasted round trip.
+  async function verifyMunicipalities() {
+    if (!importRows) return
+    const targets = importRows
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => !r.matched && !r.skip)
+    if (!targets.length) { setImportResult('Nothing to verify — every remaining row already exists.'); return }
+
+    setVerifying(true)
+    setImportResult('')
+    try {
+      const resolved = new Map<number, string>()
+      const unresolved: string[] = []
+      for (let i = 0; i < targets.length; i += 25) {
+        const batch = targets.slice(i, i + 25)
+        setVerifyProgress(`${i + 1}–${Math.min(i + batch.length, targets.length)} of ${targets.length}`)
+        const res = await fetch('/api/lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ addresses: batch.map(t => t.r.address) }),
+        })
+        if (!res.ok) throw new Error(`Lookup failed: ${res.status}`)
+        const data = await res.json()
+        data.forEach((d: any, k: number) => {
+          if (d.municipality) resolved.set(batch[k].i, d.municipality)
+          else unresolved.push(batch[k].r.address)
+        })
+      }
+      let changed = 0
+      setImportRows(rows => rows!.map((x, j) => {
+        const m = resolved.get(j)
+        if (!m || m === x.municipality) return x
+        changed++
+        return { ...x, municipality: m }
+      }))
+      setImportResult(
+        `Verified ${resolved.size} of ${targets.length} — corrected ${changed}.` +
+        (unresolved.length ? ` Couldn't place ${unresolved.length}: ${unresolved.slice(0, 3).join('; ')}${unresolved.length > 3 ? '…' : ''}` : '')
+      )
+    } catch (e: any) {
+      setImportResult(`Verify failed: ${e.message}`)
+    } finally {
+      setVerifying(false); setVerifyProgress('')
+    }
+  }
+
   async function runImport() {
     if (!importRows) return
     setImporting(true)
@@ -171,6 +223,9 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
   }
 
   const mLabel = (m: string) => MUNICIPALITIES.find(x => x.value === m)?.label || m
+
+  const newCount = importRows?.filter(r => !r.matched && !r.skip).length ?? 0
+  const matchedCount = importRows?.filter(r => r.matched).length ?? 0
 
   const NUMERIC_COLS = new Set(['year_built', 'private_ws'])
 
@@ -244,10 +299,16 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
 
       {importRows && (
         <div className="card">
-          <h2>Import Preview — {importRows.length} rows</h2>
+          <h2>
+            Import Preview — {importRows.length} rows
+            <span style={{ fontWeight: 400, fontSize: 14, color: '#6b7280', marginLeft: 8 }}>
+              ({newCount} new, {matchedCount} already on file)
+            </span>
+          </h2>
           {importWarnings.map(w => <div key={w} style={{ color: '#d97706', fontSize: 13 }}>⚠ {w}</div>)}
           <p style={{ fontSize: 13, color: '#6b7280', margin: '8px 0' }}>
-            Matched rows update owner info on the existing property. New rows are created with the selected municipality. Uncheck to skip.
+            Rows already on file update owner info on the existing property. New rows are created with
+            the municipality shown — a guess from the ZIP, so verify it before importing. Uncheck to skip.
           </p>
           <div style={{ maxHeight: 380, overflowY: 'auto' }}>
             <table style={{ width: '100%' }}>
@@ -278,6 +339,10 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
           <div className="form-actions">
             <button className="btn btn-primary" onClick={runImport} disabled={importing}>
               {importing ? 'Importing…' : `Import ${importRows.filter(r => !r.skip).length} rows`}
+            </button>
+            <button className="btn btn-ghost" onClick={verifyMunicipalities} disabled={verifying || importing}
+              title="Check each new address against the Census geocoder — rows already on file are skipped">
+              {verifying ? `Verifying ${verifyProgress}…` : `⌖ Verify ${newCount} New Address${newCount === 1 ? '' : 'es'}`}
             </button>
             <button className="btn btn-ghost" onClick={() => setImportRows(null)}>Cancel</button>
           </div>

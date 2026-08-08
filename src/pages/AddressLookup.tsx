@@ -13,6 +13,10 @@ interface LookupResult {
   duplicate?: { id: number; name: string; address: string } | null
 }
 
+// Kept under the server's per-request cap, and small enough that each round
+// trip comes back quickly.
+const BATCH_SIZE = 25
+
 const MUNI_OPTIONS = [
   { value: 'baltimore_city',   label: 'Baltimore City' },
   { value: 'baltimore_county', label: 'Baltimore County' },
@@ -26,7 +30,11 @@ export default function AddressLookup({ onAddProperties }: { onAddProperties?: (
   const [adding, setAdding] = useState(false)
   const [addedCount, setAddedCount] = useState(0)
   const [error, setError] = useState('')
+  const [progress, setProgress] = useState('')
 
+  // There's no cap on how many you can paste. The list is sent in batches so
+  // no single request sits open long enough to be cut off, and so rows appear
+  // as they resolve instead of after the whole list finishes.
   async function lookup() {
     const addresses = text.split('\n').map(l => l.trim()).filter(Boolean)
     if (!addresses.length) return
@@ -34,19 +42,30 @@ export default function AddressLookup({ onAddProperties }: { onAddProperties?: (
     setResults([])
     setAddedCount(0)
     setError('')
+    setProgress('')
     try {
-      const res = await fetch('/api/lookup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addresses }),
-      })
-      if (!res.ok) throw new Error(`Server error ${res.status}: ${await res.text()}`)
-      const data: LookupResult[] = await res.json()
-      setResults(data.map(r => ({ ...r, selected: r.supported && !r.duplicate })))
+      const all: LookupResult[] = []
+      for (let i = 0; i < addresses.length; i += BATCH_SIZE) {
+        const batch = addresses.slice(i, i + BATCH_SIZE)
+        if (addresses.length > BATCH_SIZE) {
+          setProgress(`${i + 1}–${Math.min(i + batch.length, addresses.length)} of ${addresses.length}`)
+        }
+        const res = await fetch('/api/lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ addresses: batch }),
+        })
+        if (!res.ok) throw new Error(`Server error ${res.status}: ${await res.text()}`)
+        const data: LookupResult[] = await res.json()
+        all.push(...data)
+        // Show what's resolved so far rather than making you wait for the rest.
+        setResults(all.map(r => ({ ...r, selected: r.supported && !r.duplicate })))
+      }
     } catch (err: any) {
       setError(err.message)
     } finally {
       setLoading(false)
+      setProgress('')
     }
   }
 
@@ -84,6 +103,7 @@ export default function AddressLookup({ onAddProperties }: { onAddProperties?: (
   }
 
   const selectedCount = results.filter(r => r.selected).length
+  const lineCount = text.split('\n').filter(l => l.trim()).length
 
   return (
     <div>
@@ -92,7 +112,8 @@ export default function AddressLookup({ onAddProperties }: { onAddProperties?: (
       <div className="card">
         <h2>Paste Addresses</h2>
         <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 10 }}>
-          One address per line. The Census geocoder will identify the municipality.
+          One address per line — paste as many as you like. The Census geocoder will identify
+          the municipality; long lists are looked up in batches and appear as they resolve.
         </p>
         <textarea
           className="form-group"
@@ -103,7 +124,7 @@ export default function AddressLookup({ onAddProperties }: { onAddProperties?: (
         />
         <div className="form-actions" style={{ marginTop: 8 }}>
           <button className="btn btn-primary" onClick={lookup} disabled={loading || !text.trim()}>
-            {loading ? 'Looking up…' : 'Look Up Municipalities'}
+            {loading ? (progress ? `Looking up ${progress}…` : 'Looking up…') : `Look Up ${lineCount || ''} ${lineCount === 1 ? 'Address' : 'Addresses'}`.replace('  ', ' ')}
           </button>
           {results.length > 0 && (
             <button className="btn btn-ghost" onClick={() => { setResults([]); setAddedCount(0); setError('') }}>

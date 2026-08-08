@@ -43,15 +43,28 @@ function findCol(headers: string[], ...patterns: RegExp[]): number {
   return -1
 }
 
-// Rough municipality guess from city/zip; user can override in the preview
+const HARFORD_ZIPS = new Set([
+  '21001', '21009', '21010', '21013', '21014', '21015', '21017', '21028', '21034',
+  '21040', '21047', '21050', '21078', '21084', '21085', '21130', '21132', '21154', '21161',
+])
+
+// Baltimore City proper. Everything else in the 212xx range is county — Dundalk
+// (21222), Essex (21221), Towson (21204), Parkville (21234) and so on all mail
+// as "Baltimore" but are county addresses, and they license through the county.
+const CITY_ZIPS = new Set([
+  '21201', '21202', '21205', '21206', '21209', '21210', '21211', '21212', '21213',
+  '21214', '21215', '21216', '21217', '21218', '21223', '21224', '21225', '21226',
+  '21229', '21230', '21231', '21239', '21251', '21287',
+])
+
+// First guess only — the preview lets you override each row, and the Verify
+// button replaces these with the Census geocoder's answer.
 export function guessMunicipality(city: string, zip: string): string {
   const c = (city || '').toUpperCase()
-  const z = (zip || '').trim()
-  const HARFORD_ZIPS = ['21001', '21009', '21010', '21014', '21015', '21017', '21028', '21034', '21040', '21047', '21050', '21078', '21084', '21085', '21132', '21154', '21161']
-  if (HARFORD_ZIPS.includes(z)) return 'harford'
-  if (/BEL AIR|ABERDEEN|EDGEWOOD|JOPPA|HAVRE DE GRACE|FALLSTON|FOREST HILL|ABINGDON/.test(c)) return 'harford'
-  if (z.startsWith('212')) return 'baltimore_city'
-  if (c === 'BALTIMORE' && z.startsWith('212')) return 'baltimore_city'
+  const z = (zip || '').trim().slice(0, 5)
+  if (HARFORD_ZIPS.has(z)) return 'harford'
+  if (/BEL AIR|ABERDEEN|EDGEWOOD|JOPPA|HAVRE DE GRACE|FALLSTON|FOREST HILL|ABINGDON|CHURCHVILLE|DARLINGTON|STREET, MD/.test(c)) return 'harford'
+  if (CITY_ZIPS.has(z)) return 'baltimore_city'
   return 'baltimore_county'
 }
 
@@ -68,6 +81,7 @@ export function mapAppfolioCsv(text: string): { rows: ImportRow[]; warnings: str
   const nameCol  = findCol(headers, /^property\s*name$/i, /^property$/i, /^name$/i)
   const addrCol  = findCol(headers, /^address\s*1?$/i, /street/i, /^address/i)
   const cityCol  = findCol(headers, /^city$/i)
+  const stateCol = findCol(headers, /^state$/i, /^st$/i)
   const zipCol   = findCol(headers, /zip/i, /postal/i)
   const ownerCol = findCol(headers, /^owner\s*name?s?$/i, /^owners?$/i)
   const ownerAddrCol = findCol(headers, /owner.*address/i)
@@ -77,10 +91,14 @@ export function mapAppfolioCsv(text: string): { rows: ImportRow[]; warnings: str
   const rows: ImportRow[] = raw.slice(headerIdx + 1).map(r => {
     const address = (r[addrCol] || '').trim()
     const city = cityCol >= 0 ? (r[cityCol] || '').trim() : ''
+    const state = stateCol >= 0 ? (r[stateCol] || '').trim() : ''
     const zip = zipCol >= 0 ? (r[zipCol] || '').trim() : ''
     return {
       name: (nameCol >= 0 ? r[nameCol] : '')?.trim() || address.split(',')[0],
-      address: city ? `${address}, ${city}${zip ? ' ' + zip : ''}` : address,
+      // Same shape as the properties we already hold — "STREET, CITY, MD, ZIP".
+      // The parcel and licence lookups parse this, so a different layout here
+      // would quietly fail to match.
+      address: [address, city, state || (city ? 'MD' : ''), zip].filter(Boolean).join(', '),
       municipality: guessMunicipality(city, zip),
       owner_name: ownerCol >= 0 ? (r[ownerCol] || '').trim() : '',
       owner_address: ownerAddrCol >= 0 ? (r[ownerAddrCol] || '').trim() : '',
