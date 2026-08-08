@@ -6,6 +6,8 @@ const { scrapeRentalLicenseBaltimoreCity } = require('../scrapers/rentalLicenseB
 const { scrapeMdeRegistration, scrapeMdeCertificate } = require('../scrapers/mde');
 const { harvestOpenGovLocations, keyFromAddress, resolveLocationIdByAddress, lookupYearBuiltByAddress } = require('../scrapers/opengovLocations');
 
+const { STATUS_LABEL: ACN_STATUS_LABEL } = require('./acn');
+
 const DAYS = ms => Math.round(ms / 86400000);
 
 // Express 4 does not catch rejections from async handlers, so a scraper that
@@ -99,6 +101,19 @@ function registrationStatus(registrations) {
   if (r.status === 'expired') return { status: 'red', label: `Reg expired ${r.exp_date || ''}` };
   if (r.status === 'not_found') return { status: 'red', label: 'No registration found' };
   return { status: 'yellow', label: r.status };
+}
+
+// Utility ACN enrolment. Unlike the other columns nothing is scraped — the
+// status is whatever we last recorded on the ACN Program page — so it shows
+// as-is, with the pending states amber because they're waiting on the utility.
+function acnStatus(p) {
+  if (p.acn_not_monitored) return { status: 'na', label: 'Not monitored' };
+  const s = p.acn_status || 'not_enrolled';
+  const label = ACN_STATUS_LABEL[s] || s;
+  if (s === 'enrolled') return { status: 'green', label };
+  if (s === 'na') return { status: 'na', label };
+  if (s === 'not_enrolled') return { status: 'red', label };
+  return { status: 'yellow', label };
 }
 
 // Shared gating for both lead columns — commercial/not-monitored/post-1978/lead-free
@@ -217,6 +232,7 @@ module.exports = function makeComplianceRouter(db) {
         rental_license_has_letter: licenses.some(l => l.municipality === p.municipality && l.has_letter),
         lead_registration: leadRegistrationStatus(p, leadRecords),
         lead_cert: leadCertStatus(p, leadRecords, leadUnits),
+        acn: acnStatus(p),
       };
     });
 

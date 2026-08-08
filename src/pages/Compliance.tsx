@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { downloadExcel, cell } from '../excel'
 
 type Status = 'green' | 'yellow' | 'red' | 'unknown' | 'na'
-type SortCol = 'name' | 'owner_name' | 'municipality' | 'year_built' | 'water' | 'rental_license' | 'city_registration' | 'lead_registration' | 'lead_cert'
+type SortCol = 'name' | 'owner_name' | 'municipality' | 'year_built' | 'water' | 'rental_license' | 'city_registration' | 'lead_registration' | 'lead_cert' | 'acn'
 
 interface ComplianceItem { status: Status; label: string }
 interface PropertyRow {
@@ -20,6 +20,7 @@ interface PropertyRow {
   city_registration: ComplianceItem
   lead_registration: ComplianceItem
   lead_cert: ComplianceItem
+  acn: ComplianceItem
   lead: ComplianceItem
 }
 
@@ -163,12 +164,13 @@ export default function Compliance({ onEditProperty }: Props) {
       else if (sortCol === 'city_registration') cmp = STATUS_ORDER[a.city_registration.status] - STATUS_ORDER[b.city_registration.status]
       else if (sortCol === 'lead_registration') cmp = STATUS_ORDER[a.lead_registration.status] - STATUS_ORDER[b.lead_registration.status]
       else if (sortCol === 'lead_cert') cmp = STATUS_ORDER[a.lead_cert.status] - STATUS_ORDER[b.lead_cert.status]
+      else if (sortCol === 'acn') cmp = STATUS_ORDER[a.acn.status] - STATUS_ORDER[b.acn.status]
       return sortDir === 'asc' ? cmp : -cmp
     })
   }, [rows, q, sortCol, sortDir])
 
   const summary = rows.reduce((acc, r) => {
-    for (const field of ['water', 'rental_license', 'city_registration', 'lead_registration', 'lead_cert'] as const) {
+    for (const field of ['water', 'rental_license', 'city_registration', 'lead_registration', 'lead_cert', 'acn'] as const) {
       const s = r[field].status
       if (s === 'red') acc.red++
       else if (s === 'yellow') acc.yellow++
@@ -197,6 +199,7 @@ export default function Compliance({ onEditProperty }: Props) {
       Registration: r.city_registration.label, 'Registration Flag': r.city_registration.status,
       'Lead Registration': r.lead_registration.label, 'Lead Reg Flag': r.lead_registration.status,
       'Lead Certificate': r.lead_cert.label, 'Lead Cert Flag': r.lead_cert.status,
+      ACN: r.acn.label, 'ACN Flag': r.acn.status,
     })))
   }
 
@@ -253,6 +256,7 @@ export default function Compliance({ onEditProperty }: Props) {
               <Th col="city_registration">Registration</Th>
               <Th col="lead_registration">Lead Registration</Th>
               <Th col="lead_cert">Lead Certificate</Th>
+              <Th col="acn">ACN</Th>
               <th style={{ whiteSpace: 'nowrap' }}>Actions</th>
             </tr>
           </thead>
@@ -280,6 +284,7 @@ export default function Compliance({ onEditProperty }: Props) {
                 <StatusCell item={r.city_registration} />
                 <StatusCell item={r.lead_registration} />
                 <StatusCell item={r.lead_cert} />
+                <StatusCell item={r.acn} />
                 <td style={{ whiteSpace: 'nowrap' }}>
                   <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', gap: 4, alignItems: 'center' }}>
                     {!r.year_built && (
