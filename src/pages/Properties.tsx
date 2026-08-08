@@ -158,9 +158,12 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
         const near = hit ? null : (loose.get(looseStreetKey(r.address)) || unitless.get(unitlessStreetKey(r.address)))
         const p = hit || near
         if (!p) return { ...r, matched: false }
+        // Rows we already hold start unticked — an import shouldn't quietly
+        // rewrite owner details on the whole portfolio. Tick the ones you want.
         return {
           ...r,
           matched: true,
+          skip: true,
           matchedVia: hit ? 'exact' as const : 'close' as const,
           matchedAddress: p.address,
         }
@@ -249,6 +252,14 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
 
   const newCount = importRows?.filter(r => !r.matched && !r.skip).length ?? 0
   const matchedCount = importRows?.filter(r => r.matched).length ?? 0
+  const tickedCount = importRows?.filter(r => !r.skip).length ?? 0
+  const allTicked = !!importRows?.length && tickedCount === importRows.length
+  const someTicked = tickedCount > 0
+
+  const setAllSkipped = (skip: boolean) => setImportRows(rows => rows!.map(r => ({ ...r, skip })))
+  // Only the rows that would create a property, for when you're adding new
+  // ones without touching what's already on file.
+  const tickOnlyNew = () => setImportRows(rows => rows!.map(r => ({ ...r, skip: !!r.matched })))
 
   const NUMERIC_COLS = new Set(['year_built', 'private_ws'])
 
@@ -330,13 +341,32 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
           </h2>
           {importWarnings.map(w => <div key={w} style={{ color: '#d97706', fontSize: 13 }}>⚠ {w}</div>)}
           <p style={{ fontSize: 13, color: '#6b7280', margin: '8px 0' }}>
-            Rows already on file update owner info on the existing property. New rows are created with
-            the municipality shown — a guess from the ZIP, so verify it before importing. Uncheck to skip.
+            Rows already on file start unchecked — tick one to refresh its owner details from the CSV.
+            New rows are created with the municipality shown, which is a guess from the ZIP, so verify
+            it before importing.
           </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '0 0 8px' }}>
+            <span style={{ fontSize: 12, color: '#6b7280' }}>Select:</span>
+            <button className="btn btn-ghost btn-sm" onClick={() => setAllSkipped(false)}>All</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setAllSkipped(true)}>None</button>
+            <button className="btn btn-ghost btn-sm" onClick={tickOnlyNew}>New only</button>
+            <span style={{ fontSize: 12, color: '#6b7280', marginLeft: 4 }}>{tickedCount} of {importRows.length} selected</span>
+          </div>
           <div style={{ maxHeight: 380, overflowY: 'auto' }}>
             <table style={{ width: '100%' }}>
               <thead>
-                <tr><th></th><th>Action</th><th>Name</th><th>Address</th><th>Municipality</th><th>Owner</th><th>Owner Address</th></tr>
+                <tr>
+                  <th>
+                    <input
+                      type="checkbox"
+                      title={allTicked ? 'Uncheck all' : 'Check all'}
+                      checked={allTicked}
+                      ref={el => { if (el) el.indeterminate = someTicked && !allTicked }}
+                      onChange={e => setAllSkipped(!e.target.checked)}
+                    />
+                  </th>
+                  <th>Action</th><th>Name</th><th>Address</th><th>Municipality</th><th>Owner</th><th>Owner Address</th>
+                </tr>
               </thead>
               <tbody>
                 {importRows.map((r, i) => (
@@ -370,8 +400,8 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
             </table>
           </div>
           <div className="form-actions">
-            <button className="btn btn-primary" onClick={runImport} disabled={importing}>
-              {importing ? 'Importing…' : `Import ${importRows.filter(r => !r.skip).length} rows`}
+            <button className="btn btn-primary" onClick={runImport} disabled={importing || tickedCount === 0}>
+              {importing ? 'Importing…' : `Import ${tickedCount} row${tickedCount === 1 ? '' : 's'}`}
             </button>
             <button className="btn btn-ghost" onClick={verifyMunicipalities} disabled={verifying || importing}
               title="Check each new address against the Census geocoder — rows already on file are skipped">
