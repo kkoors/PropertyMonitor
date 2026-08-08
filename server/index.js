@@ -44,6 +44,7 @@ async function start() {
   app.use('/api/lead', makeLeadRouter(db));
   app.use('/api/rental-licenses', makeRentalLicensesRouter(db));
   app.use('/api/compliance', makeComplianceRouter(db));
+  app.use('/api/acn', require('./routes/acn')(db));
   app.use('/api/settings', require('./routes/settings')(db));
   app.get('/api/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 

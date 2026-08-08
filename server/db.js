@@ -179,6 +179,12 @@ function initSchema(db) {
   // Who pays the water bill: owner | management | tenant. Owner-paid
   // properties are not monitored for water.
   if (!ownerCols.includes('water_responsibility')) db.prepare(`ALTER TABLE properties ADD COLUMN water_responsibility TEXT NOT NULL DEFAULT 'management'`).run();
+  // Utility ACN program: service reverts to us automatically if a tenant shuts
+  // it off. enrolled | pending_enrollment | pending_disenrollment | not_enrolled | na
+  if (!ownerCols.includes('acn_status')) db.prepare(`ALTER TABLE properties ADD COLUMN acn_status TEXT NOT NULL DEFAULT 'not_enrolled'`).run();
+  if (!ownerCols.includes('acn_not_monitored')) db.prepare(`ALTER TABLE properties ADD COLUMN acn_not_monitored INTEGER NOT NULL DEFAULT 0`).run();
+  if (!ownerCols.includes('acn_updated_at')) db.prepare(`ALTER TABLE properties ADD COLUMN acn_updated_at TEXT`).run();
+  if (!ownerCols.includes('acn_note')) db.prepare(`ALTER TABLE properties ADD COLUMN acn_note TEXT`).run();
 
   db.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
   // OpenGov applicant account whose records map addresses -> DHCD location IDs

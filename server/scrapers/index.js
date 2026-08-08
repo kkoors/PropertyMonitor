@@ -80,6 +80,8 @@ function getCredentials(db, propertyId, portal) {
   return { username: decrypt(row.username_enc, row.iv), password: decrypt(row.password_enc, row.iv) };
 }
 
+const money = v => (v == null || v === '' ? null : Math.round(Number(v) * 100));
+
 function insertBillIfNew(db, bill, runId) {
   // Check for duplicate first (sql.js doesn't return changes reliably on INSERT OR IGNORE)
   const existing = db.prepare(
@@ -92,6 +94,38 @@ function insertBillIfNew(db, bill, runId) {
         .run(bill.period_start || null, bill.period_end || null, existing.id);
     }
     return false;
+  }
+
+  // The portals don't always publish a bill date — Harford falls back to
+  // today's — so keying only on (bill_date, amount) files the same unchanged
+  // bill again on every run. A bill is only genuinely new when the amount
+  // owed changed, or when it covers a later billing period.
+  const latest = db.prepare(
+    `SELECT id, amount_due, current_balance, period_end, due_date, last_pay_date, last_pay_amount
+       FROM bills WHERE property_id = ? ORDER BY datetime(created_at) DESC, id DESC LIMIT 1`
+  ).get(bill.property_id);
+
+  if (latest) {
+    const sameAmount = money(latest.amount_due) === money(bill.amount_due);
+    const sameBalance = money(latest.current_balance) === money(bill.current_balance);
+    const newPeriod = bill.period_end && latest.period_end && bill.period_end > latest.period_end;
+
+    if (sameAmount && sameBalance && !newPeriod) {
+      // Same money as last time: refresh anything we learned, file nothing.
+      db.prepare(
+        `UPDATE bills SET
+           due_date        = COALESCE(?, due_date),
+           period_start    = COALESCE(period_start, ?),
+           period_end      = COALESCE(period_end, ?),
+           last_pay_date   = COALESCE(?, last_pay_date),
+           last_pay_amount = COALESCE(?, last_pay_amount)
+         WHERE id = ?`
+      ).run(
+        bill.due_date || null, bill.period_start || null, bill.period_end || null,
+        bill.last_pay_date || null, bill.last_pay_amount ?? null, latest.id
+      );
+      return false;
+    }
   }
 
   const status = (bill.amount_due != null && bill.amount_due <= 0) ? 'paid' : 'new';
@@ -172,4 +206,4 @@ function makeRunOne(db) {
   };
 }
 
-module.exports = { makeRunScrapers, makeRunOne };
+module.exports = { makeRunScrapers, makeRunOne, insertBillIfNew };

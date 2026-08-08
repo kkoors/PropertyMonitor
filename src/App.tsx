@@ -10,11 +10,13 @@ import Compliance from './pages/Compliance'
 import Licensing from './pages/Licensing'
 import LeadRegistry from './pages/LeadRegistry'
 import TaxAddress from './pages/TaxAddress'
+import AcnProgram from './pages/AcnProgram'
+import AcnEmailSetup from './pages/AcnEmailSetup'
 import './app.css'
 
-type Page = 'compliance' | 'licensing' | 'lead' | 'taxaddress' | 'properties' | 'lookup' | 'bills' | 'dashboard' | 'scrapes' | 'admin'
+type Page = 'acn' | 'acnsetup' | 'compliance' | 'licensing' | 'lead' | 'taxaddress' | 'properties' | 'lookup' | 'bills' | 'dashboard' | 'scrapes' | 'admin'
 
-const PAGES: Page[] = ['compliance', 'licensing', 'lead', 'taxaddress', 'properties', 'lookup', 'bills', 'dashboard', 'scrapes', 'admin']
+const PAGES: Page[] = ['acn', 'acnsetup', 'compliance', 'licensing', 'lead', 'taxaddress', 'properties', 'lookup', 'bills', 'dashboard', 'scrapes', 'admin']
 
 const DEFAULT_NAME = 'KRS Property Compliance Monitor'
 
@@ -107,6 +109,7 @@ export default function App() {
           {nav('licensing', 'Licensing')}
           {nav('lead', 'Lead Registry')}
           {nav('taxaddress', 'Tax Address')}
+          {nav('acn', 'ACN Program')}
           {nav('properties', 'Properties')}
           {nav('lookup', 'Address Lookup')}
           {nav('dashboard', 'Water Dashboard')}
@@ -124,6 +127,8 @@ export default function App() {
         {page === 'licensing'   && <Licensing onEditProperty={goEditProperty} />}
         {page === 'lead'        && <LeadRegistry onEditProperty={goEditProperty} />}
         {page === 'taxaddress'  && <TaxAddress onEditProperty={goEditProperty} />}
+        {page === 'acn'         && <AcnProgram onEditProperty={goEditProperty} onConfigure={() => setPage('acnsetup')} />}
+        {page === 'acnsetup'    && <AcnEmailSetup />}
         {page === 'properties'  && <Properties editPropertyId={editPropertyId} onClearEditId={clearEditProperty} onDoneEditing={doneEditing} />}
         {page === 'lookup'      && <AddressLookup onAddProperties={() => setPage('properties')} />}
         {page === 'dashboard'   && <Dashboard onNavigate={p => setPage(p as Page)} />}

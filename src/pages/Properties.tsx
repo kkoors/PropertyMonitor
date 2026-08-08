@@ -9,7 +9,7 @@ const MUNICIPALITIES = [
   { value: 'harford', label: 'Harford County' },
 ]
 
-const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '', owner_name: '', owner_address: '', commercial: false, multifamily: false, lead_not_monitored: false, license_not_monitored: false, tax_id: '', water_mailing_address: '', opengov_location_id: '', ignore_name_mismatch: false, water_responsibility: 'management' }
+const BLANK = { name: '', address: '', municipality: 'baltimore_city', account_number: '', notes: '', private_ws: false, year_built: '', lead_free: false, lead_free_cert_date: '', lead_free_cert_exp_date: '', owner_name: '', owner_address: '', commercial: false, multifamily: false, lead_not_monitored: false, license_not_monitored: false, tax_id: '', water_mailing_address: '', opengov_location_id: '', ignore_name_mismatch: false, water_responsibility: 'management', acn_not_monitored: false }
 
 interface Props {
   editPropertyId?: number | null
@@ -68,6 +68,7 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
       opengov_location_id: form.opengov_location_id || null,
         ignore_name_mismatch: form.ignore_name_mismatch ? 1 : 0,
         water_responsibility: form.water_responsibility || 'management',
+        acn_not_monitored: form.acn_not_monitored ? 1 : 0,
       owner_name: form.owner_name || null,
       owner_address: form.owner_address || null,
       lead_free_cert_date: form.lead_free_cert_date || null,
@@ -81,7 +82,7 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
   }
 
   function startEdit(p: any) {
-    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '', owner_name: p.owner_name || '', owner_address: p.owner_address || '', commercial: !!p.commercial, multifamily: !!p.multifamily, lead_not_monitored: !!p.lead_not_monitored, license_not_monitored: !!p.license_not_monitored, tax_id: p.tax_id || '', water_mailing_address: p.water_mailing_address || '', opengov_location_id: p.opengov_location_id || '', ignore_name_mismatch: !!p.ignore_name_mismatch, water_responsibility: p.water_responsibility || 'management' })
+    setForm({ name: p.name, address: p.address, municipality: p.municipality, account_number: p.account_number || '', notes: p.notes || '', private_ws: !!p.private_ws, year_built: p.year_built ? String(p.year_built) : '', lead_free: !!p.lead_free, lead_free_cert_date: p.lead_free_cert_date || '', lead_free_cert_exp_date: p.lead_free_cert_exp_date || '', owner_name: p.owner_name || '', owner_address: p.owner_address || '', commercial: !!p.commercial, multifamily: !!p.multifamily, lead_not_monitored: !!p.lead_not_monitored, license_not_monitored: !!p.license_not_monitored, tax_id: p.tax_id || '', water_mailing_address: p.water_mailing_address || '', opengov_location_id: p.opengov_location_id || '', ignore_name_mismatch: !!p.ignore_name_mismatch, water_responsibility: p.water_responsibility || 'management', acn_not_monitored: !!p.acn_not_monitored })
     setEditId(p.id)
     setShowForm(true)
   }
@@ -296,6 +297,13 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
                 Ignore Owner Name Mismatch
               </label>
               <span style={{ fontSize: 11, color: '#9ca3af' }}>Title held by an LLC while SDAT still lists the individual</span>
+            </div>
+            <div className="form-group" style={{ justifyContent: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
+                <input type="checkbox" checked={form.acn_not_monitored} onChange={e => setForm(f => ({ ...f, acn_not_monitored: e.target.checked }))} />
+                ACN Not Monitored
+              </label>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>Excluded from the ACN program page</span>
             </div>
             {form.municipality === 'baltimore_city' && (
               <div className="form-group full-col">

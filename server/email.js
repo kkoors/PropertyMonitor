@@ -74,4 +74,31 @@ async function sendBillEmail(bill, property, pdfBuffer, pdfFilename) {
   }
 }
 
-module.exports = { sendBillEmail };
+// Generic sender for the configurable ACN enrollment / disenrollment notices.
+async function sendConfiguredEmail({ to, cc, subject, html }) {
+  const recipients = String(to || '')
+    .split(/[;,]/).map(s => s.trim()).filter(Boolean);
+  if (!recipients.length) throw new Error('No recipient configured');
+
+  const token = await getAccessToken();
+  const message = {
+    subject: subject || '(no subject)',
+    body: { contentType: 'HTML', content: html || '' },
+    toRecipients: recipients.map(address => ({ emailAddress: { address } })),
+  };
+  const ccList = String(cc || '').split(/[;,]/).map(s => s.trim()).filter(Boolean);
+  if (ccList.length) message.ccRecipients = ccList.map(address => ({ emailAddress: { address } }));
+
+  const resp = await fetch(`https://graph.microsoft.com/v1.0/users/${FROM}/sendMail`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, saveToSentItems: true }),
+  });
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Graph sendMail failed: ${resp.status} ${err}`);
+  }
+  return { sentTo: recipients, cc: ccList };
+}
+
+module.exports = { sendBillEmail, sendConfiguredEmail };
