@@ -7,7 +7,28 @@ export interface ImportRow {
   owner_name: string
   owner_address: string
   matched?: boolean
+  /** How the row was matched: exactly, or by loose spelling. */
+  matchedVia?: 'exact' | 'close'
+  /** The address we already hold, shown when the two spellings differ. */
+  matchedAddress?: string
   skip?: boolean
+}
+
+// Street portion only, punctuation flattened to single spaces.
+export function streetKey(address: string): string {
+  return (address || '').split(',')[0].toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+// A deliberately loose key for spellings we've corrected here but AppFolio
+// still has wrong: apostrophes, hyphens and missing spaces all disappear, so
+// "2831 ODONNELL" matches "2831 O'Donnell" and "1010 WESTSHORE" matches
+// "1010 West Shore". Street types are left alone — Oak Rd and Oak St are
+// different streets, and collapsing them would merge real properties.
+export function looseStreetKey(address: string): string {
+  return streetKey(address)
+    .replace(/\bSAINT\b/g, 'ST')
+    .replace(/\bMOUNT\b/g, 'MT')
+    .replace(/[^A-Z0-9]/g, '')
 }
 
 // Minimal CSV parser with quoted-field support
@@ -68,14 +89,68 @@ export function guessMunicipality(city: string, zip: string): string {
   return 'baltimore_county'
 }
 
+// A row that starts with a street number is data, not a header.
+const looksLikeAddress = (cells: string[]) => /^\s*\d+[-\s]/.test(cells[0] || '')
+
+// Some exports are just a bare list of addresses with no header row at all,
+// either one per line or split across street/city/state/zip columns. Nothing
+// then names the columns, so they're identified by shape: a two-letter state,
+// a five-digit ZIP, and whatever sits between them is the city.
+function mapHeaderless(raw: string[][]): { rows: ImportRow[]; warnings: string[] } {
+  const rows: ImportRow[] = []
+  for (const r of raw) {
+    const cells = r.map(c => (c || '').trim()).filter(Boolean)
+    if (!cells.length) continue
+
+    // An unquoted "123 Main St, Baltimore, MD 21201" arrives already split on
+    // its commas, so real columns and one run-together field look the same by
+    // the time we see them. Rejoining and parsing the whole line handles both.
+    const parts = cells.join(', ').split(',').map(s => s.trim()).filter(Boolean)
+    const street = parts[0]
+    if (!street) continue
+
+    const tail = parts.slice(1).join(' ')
+    let city = '', state = '', zip = ''
+    const m = tail.match(/\b([A-Za-z]{2})\b[\s,]*(\d{5})(?:-\d{4})?\s*$/)
+    if (m) {
+      state = m[1].toUpperCase()
+      zip = m[2]
+      city = tail.slice(0, m.index).trim()
+    } else {
+      const z = tail.match(/\b(\d{5})(?:-\d{4})?\b/)
+      zip = z ? z[1] : ''
+      city = (z ? tail.slice(0, z.index) : tail).replace(/\b[A-Za-z]{2}\b\s*$/, '').trim()
+    }
+
+    rows.push({
+      name: street,
+      address: [street, city, state || (city ? 'MD' : ''), zip].filter(Boolean).join(', '),
+      municipality: guessMunicipality(city, zip),
+      owner_name: '',
+      owner_address: '',
+    })
+  }
+  return {
+    rows,
+    warnings: rows.length ? ['No header row — read every line as an address. Check the municipalities before importing.'] : ['Nothing in this file looks like an address'],
+  }
+}
+
 export function mapAppfolioCsv(text: string): { rows: ImportRow[]; warnings: string[] } {
   const raw = parseCsv(text)
   const warnings: string[] = []
-  if (raw.length < 2) return { rows: [], warnings: ['CSV has no data rows'] }
+  if (!raw.length) return { rows: [], warnings: ['CSV is empty'] }
 
   // AppFolio reports sometimes have a title row before the header — find the header row
-  let headerIdx = raw.findIndex(r => r.some(c => /address/i.test(c)))
-  if (headerIdx < 0) { headerIdx = 0; warnings.push('No "Address" column found — using first row as header') }
+  let headerIdx = raw.findIndex(r => r.some(c => /address|street/i.test(c)) && !looksLikeAddress(r))
+
+  // No header at all: the export is just a list of addresses.
+  if (headerIdx < 0) {
+    const data = raw.filter(r => looksLikeAddress(r))
+    if (data.length) return mapHeaderless(data)
+    headerIdx = 0
+    warnings.push('No "Address" column found — using first row as header')
+  }
   const headers = raw[headerIdx].map(h => h.trim())
 
   const nameCol  = findCol(headers, /^property\s*name$/i, /^property$/i, /^name$/i)

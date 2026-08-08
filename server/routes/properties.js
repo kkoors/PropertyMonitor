@@ -55,16 +55,22 @@ module.exports = function makePropertiesRouter(db) {
     const { rows } = req.body || {};
     if (!Array.isArray(rows)) return res.status(400).json({ error: 'rows array required' });
 
+    // Mirrors streetKey/looseStreetKey in src/appfolioCsv.ts — the preview and
+    // the import have to agree on what counts as the same property, or a row
+    // shown as "Update" would come in as a second copy.
     const normStreet = a => (a || '').split(',')[0].toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const looseStreet = a => normStreet(a).replace(/\bSAINT\b/g, 'ST').replace(/\bMOUNT\b/g, 'MT').replace(/[^A-Z0-9]/g, '');
     const existing = db.prepare(`SELECT id, address FROM properties`).all()
-      .map(p => ({ id: p.id, key: normStreet(p.address) }));
+      .map(p => ({ id: p.id, key: normStreet(p.address), loose: looseStreet(p.address) }));
 
     let created = 0, updated = 0, skipped = 0;
     for (const row of rows) {
       if (row.skip) { skipped++; continue; }
       if (!row.address) { skipped++; continue; }
       const key = normStreet(row.address);
-      const match = existing.find(e => e.key && e.key === key);
+      const loose = looseStreet(row.address);
+      const match = existing.find(e => e.key && e.key === key)
+        || existing.find(e => e.loose && e.loose === loose);
 
       if (match) {
         db.prepare(`UPDATE properties SET

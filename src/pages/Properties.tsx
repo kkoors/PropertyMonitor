@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import type React from 'react'
 import { useLocalState } from '../useLocalState'
-import { mapAppfolioCsv, type ImportRow } from '../appfolioCsv'
+import { mapAppfolioCsv, streetKey, looseStreetKey, type ImportRow } from '../appfolioCsv'
 import { downloadExcel, cell, dateCell } from '../excel'
 
 const WATER_RESP_LABEL: Record<string, string> = {
@@ -138,10 +138,30 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
     const reader = new FileReader()
     reader.onload = () => {
       const { rows, warnings } = mapAppfolioCsv(String(reader.result || ''))
-      // Mark rows whose street already exists so the preview shows update vs create
-      const normStreet = (a: string) => a.split(',')[0].toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
-      const known = new Set(properties.map(p => normStreet(p.address || '')))
-      setImportRows(rows.map(r => ({ ...r, matched: known.has(normStreet(r.address)) })))
+
+      // Match on the exact street first, then fall back to the loose spelling
+      // so a property we've corrected here still matches AppFolio's version.
+      const exact = new Map<string, any>()
+      const loose = new Map<string, any>()
+      for (const p of properties) {
+        const e = streetKey(p.address || '')
+        const l = looseStreetKey(p.address || '')
+        if (e && !exact.has(e)) exact.set(e, p)
+        if (l && !loose.has(l)) loose.set(l, p)
+      }
+
+      setImportRows(rows.map(r => {
+        const hit = exact.get(streetKey(r.address))
+        const near = hit ? null : loose.get(looseStreetKey(r.address))
+        const p = hit || near
+        if (!p) return { ...r, matched: false }
+        return {
+          ...r,
+          matched: true,
+          matchedVia: hit ? 'exact' as const : 'close' as const,
+          matchedAddress: p.address,
+        }
+      }))
       setImportWarnings(warnings)
       setImportResult('')
     }
@@ -319,9 +339,19 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
                 {importRows.map((r, i) => (
                   <tr key={i} style={{ opacity: r.skip ? 0.4 : 1 }}>
                     <td><input type="checkbox" checked={!r.skip} onChange={e => setImportRows(rows => rows!.map((x, j) => j === i ? { ...x, skip: !e.target.checked } : x))} /></td>
-                    <td style={{ fontWeight: 600, color: r.matched ? '#2563eb' : '#059669' }}>{r.matched ? 'Update' : 'Create'}</td>
+                    <td style={{ fontWeight: 600, color: r.matched ? '#2563eb' : '#059669', whiteSpace: 'nowrap' }}>
+                      {r.matched ? 'Update' : 'Create'}
+                      {r.matchedVia === 'close' && (
+                        <div style={{ fontWeight: 400, fontSize: 11, color: '#d97706' }}>close match</div>
+                      )}
+                    </td>
                     <td>{r.name}</td>
-                    <td style={{ fontSize: 13 }}>{r.address}</td>
+                    <td style={{ fontSize: 13 }}>
+                      {r.address}
+                      {r.matchedVia === 'close' && (
+                        <div style={{ fontSize: 11, color: '#d97706' }}>→ ours: {r.matchedAddress}</div>
+                      )}
+                    </td>
                     <td>
                       {r.matched ? <span style={{ color: '#9ca3af', fontSize: 12 }}>existing</span> : (
                         <select value={r.municipality} onChange={e => setImportRows(rows => rows!.map((x, j) => j === i ? { ...x, municipality: e.target.value } : x))}>
