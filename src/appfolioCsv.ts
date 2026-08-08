@@ -14,42 +14,9 @@ export interface ImportRow {
   skip?: boolean
 }
 
-// Street portion only, punctuation flattened to single spaces.
-export function streetKey(address: string): string {
-  return (address || '').split(',')[0].toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
-// Long spellings folded to the abbreviation we store, so "Hazel Lane" matches
-// "HAZEL LN" and "North Bentalou Street" matches "N BENTALOU ST". The type is
-// normalised rather than dropped — Oak Rd and Oak St stay different streets.
-const WORD_FORMS: [RegExp, string][] = [
-  [/\bAVENUE\b/g, 'AVE'], [/\bBOULEVARD\b/g, 'BLVD'], [/\bCIRCLE\b/g, 'CIR'],
-  [/\bCOURT\b/g, 'CT'], [/\bDRIVE\b/g, 'DR'], [/\bHIGHWAY\b/g, 'HWY'],
-  [/\bLANE\b/g, 'LN'], [/\bPARKWAY\b/g, 'PKWY'], [/\bPLACE\b/g, 'PL'],
-  [/\bROAD\b/g, 'RD'], [/\bSQUARE\b/g, 'SQ'], [/\bSTREET\b/g, 'ST'],
-  [/\bTERRACE\b/g, 'TER'], [/\bTRAIL\b/g, 'TRL'],
-  [/\bNORTH\b/g, 'N'], [/\bSOUTH\b/g, 'S'], [/\bEAST\b/g, 'E'], [/\bWEST\b/g, 'W'],
-  [/\bSAINT\b/g, 'ST'], [/\bMOUNT\b/g, 'MT'],
-]
-
-// A deliberately loose key for spellings we've corrected here but AppFolio
-// still has wrong: apostrophes, hyphens and missing spaces all disappear, so
-// "2831 ODONNELL" matches "2831 O'Donnell" and "1010 WSHORE" matches
-// "1010 West Shore".
-export function looseStreetKey(address: string): string {
-  let s = streetKey(address)
-  for (const [re, to] of WORD_FORMS) s = s.replace(re, to)
-  return s.replace(/[^A-Z0-9]/g, '')
-}
-
-// Last resort: the same key with any unit designator removed, for exports that
-// carry the unit in the street line when we hold the building as one record.
-export function unitlessStreetKey(address: string): string {
-  const s = streetKey(address)
-    .replace(new RegExp(`\\b(${UNIT_WORDS})\\b.*$`), '')
-    .replace(/#.*$/, '')
-  return looseStreetKey(s)
-}
+// Address matching lives in shared/ so the import route runs the very same
+// code — a preview that says "Update" must not import as a second copy.
+export { streetKey, looseStreetKey, unitlessStreetKey, noDirectionKey, buildMatchIndex } from '../shared/addressMatch.mjs'
 
 // Tab-separated exports are common — Excel produces them, and a tab file has
 // no trouble with the commas inside an address. Whichever character appears

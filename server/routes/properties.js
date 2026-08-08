@@ -51,45 +51,20 @@ module.exports = function makePropertiesRouter(db) {
   // Bulk import from AppFolio CSV (rows already parsed/mapped client-side).
   // Matches existing properties by street line of the address; updates owner
   // info on matches, creates the rest.
-  router.post('/import', (req, res) => {
+  router.post('/import', async (req, res) => {
     const { rows } = req.body || {};
     if (!Array.isArray(rows)) return res.status(400).json({ error: 'rows array required' });
 
-    // Mirrors streetKey/looseStreetKey in src/appfolioCsv.ts — the preview and
-    // the import have to agree on what counts as the same property, or a row
-    // shown as "Update" would come in as a second copy.
-    const WORD_FORMS = [
-      [/\bAVENUE\b/g, 'AVE'], [/\bBOULEVARD\b/g, 'BLVD'], [/\bCIRCLE\b/g, 'CIR'],
-      [/\bCOURT\b/g, 'CT'], [/\bDRIVE\b/g, 'DR'], [/\bHIGHWAY\b/g, 'HWY'],
-      [/\bLANE\b/g, 'LN'], [/\bPARKWAY\b/g, 'PKWY'], [/\bPLACE\b/g, 'PL'],
-      [/\bROAD\b/g, 'RD'], [/\bSQUARE\b/g, 'SQ'], [/\bSTREET\b/g, 'ST'],
-      [/\bTERRACE\b/g, 'TER'], [/\bTRAIL\b/g, 'TRL'],
-      [/\bNORTH\b/g, 'N'], [/\bSOUTH\b/g, 'S'], [/\bEAST\b/g, 'E'], [/\bWEST\b/g, 'W'],
-      [/\bSAINT\b/g, 'ST'], [/\bMOUNT\b/g, 'MT'],
-    ];
-    const UNIT_WORDS = /\b(APT|APARTMENT|UNIT|STE|SUITE|FL|FLOOR|BSMT|BASEMENT|RM|ROOM)\b.*$/;
-
-    const normStreet = a => (a || '').split(',')[0].toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-    const looseStreet = a => {
-      let s = normStreet(a);
-      for (const [re, to] of WORD_FORMS) s = s.replace(re, to);
-      return s.replace(/[^A-Z0-9]/g, '');
-    };
-    const unitlessStreet = a => looseStreet(normStreet(a).replace(UNIT_WORDS, ''));
-
-    const existing = db.prepare(`SELECT id, address FROM properties`).all()
-      .map(p => ({ id: p.id, key: normStreet(p.address), loose: looseStreet(p.address), unitless: unitlessStreet(p.address) }));
+    // The very same matcher the import preview ran, so what it showed as
+    // "Update" can't arrive here as a second copy.
+    const { buildMatchIndex } = await import('../../shared/addressMatch.mjs');
+    const index = buildMatchIndex(db.prepare(`SELECT id, address FROM properties`).all());
 
     let created = 0, updated = 0, skipped = 0;
     for (const row of rows) {
       if (row.skip) { skipped++; continue; }
       if (!row.address) { skipped++; continue; }
-      const key = normStreet(row.address);
-      const loose = looseStreet(row.address);
-      const unitless = unitlessStreet(row.address);
-      const match = existing.find(e => e.key && e.key === key)
-        || existing.find(e => e.loose && e.loose === loose)
-        || existing.find(e => e.unitless && e.unitless === unitless);
+      const match = index.find(row.address)?.property;
 
       if (match) {
         db.prepare(`UPDATE properties SET

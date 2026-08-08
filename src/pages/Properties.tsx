@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import type React from 'react'
 import { useLocalState } from '../useLocalState'
-import { mapAppfolioCsv, streetKey, looseStreetKey, unitlessStreetKey, type ImportRow } from '../appfolioCsv'
+import { mapAppfolioCsv, buildMatchIndex, type ImportRow } from '../appfolioCsv'
 import { downloadExcel, cell, dateCell } from '../excel'
 
 const WATER_RESP_LABEL: Record<string, string> = {
@@ -141,23 +141,12 @@ export default function Properties({ editPropertyId, onClearEditId, onDoneEditin
 
       // Match on the exact street first, then fall back to the loose spelling
       // so a property we've corrected here still matches AppFolio's version.
-      const exact = new Map<string, any>()
-      const loose = new Map<string, any>()
-      const unitless = new Map<string, any>()
-      for (const p of properties) {
-        const e = streetKey(p.address || '')
-        const l = looseStreetKey(p.address || '')
-        const u = unitlessStreetKey(p.address || '')
-        if (e && !exact.has(e)) exact.set(e, p)
-        if (l && !loose.has(l)) loose.set(l, p)
-        if (u && !unitless.has(u)) unitless.set(u, p)
-      }
+      const index = buildMatchIndex(properties)
 
       setImportRows(rows.map(r => {
-        const hit = exact.get(streetKey(r.address))
-        const near = hit ? null : (loose.get(looseStreetKey(r.address)) || unitless.get(unitlessStreetKey(r.address)))
-        const p = hit || near
-        if (!p) return { ...r, matched: false }
+        const found = index.find(r.address)
+        if (!found) return { ...r, matched: false }
+        const { property: p, exact: hit } = found
         // Rows we already hold start unticked — an import shouldn't quietly
         // rewrite owner details on the whole portfolio. Tick the ones you want.
         return {
